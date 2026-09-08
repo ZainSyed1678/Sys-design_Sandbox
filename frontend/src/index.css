@@ -1,0 +1,41 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  font-family: sans-serif;
+}
+
+.custom-node {
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid #222;
+  background: white;
+  min-width: 100px;
+  text-align: center;
+  font-weight: bold;
+}
+
+.custom-node.client { background: #e3f2fd; }
+.custom-node.load_balancer { background: #fff3e0; }
+.custom-node.api { background: #e8f5e9; }
+.custom-node.database { background: #ffebee; }
+.custom-node.cache { background: #f3e5f5; }
+
+.toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  background: white;
+  padding: 10px;
+  border-radius: 5px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  display: flex;
+  gap: 10px;
+}
+
+.toolbar button {
+  padding: 5px 10px;
+  cursor: pointer;
+}
