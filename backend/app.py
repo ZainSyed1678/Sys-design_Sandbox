@@ -3,6 +3,7 @@ from flask_socketio import SocketIO
 from flask_cors import CORS
 import os
 from api.architecture import architecture_bp
+from api.simulation_api import simulation_bp
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'caveman-secret')
@@ -11,6 +12,7 @@ CORS(app) # Allow Face to talk to Brain
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 app.register_blueprint(architecture_bp, url_prefix='/api/architecture')
+app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
 
 @app.route('/api/health')
 def health_check():
