@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from simulation.engine import SimulationEngine
 from simulation.components import Client, LoadBalancer, APIServer, Database
 from simulation.events import Event, EventType
+from extensions import socketio
 
 class SimState(Enum):
     CREATED = "CREATED"
@@ -60,18 +61,28 @@ class SimulationInstance:
                     self.engine.register_component(comp)
             self.state = SimState.CREATED
         except Exception as e:
-            print("Failed building graph:", e)
+            print("Grog broke building graph:", e)
             self.state = SimState.FAILED
 
     def _run_loop(self):
         self.state = SimState.RUNNING
+        socketio.emit('SIM_STARTED', {'sim_id': self.sim_id})
         
         while not self._stop_event.is_set():
             step_until = self.engine.time + 0.5
             self.engine.run(until=step_until)
+            
+            socketio.emit('METRICS_UPDATE', {
+                'sim_id': self.sim_id,
+                'time': self.engine.time,
+                'metrics': self.engine.metrics,
+                'components': self.engine.get_component_states()
+            })
+            
             time.sleep(0.5)
             
         self.state = SimState.STOPPED
+        socketio.emit('SIM_STOPPED', {'sim_id': self.sim_id})
 
     def start(self):
         if self.state in [SimState.RUNNING, SimState.FAILED]:
