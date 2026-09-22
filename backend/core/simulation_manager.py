@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Dict, Any, Optional
 
 from simulation.engine import SimulationEngine
-from simulation.components import Client, LoadBalancer, APIServer, Database
+from simulation.components import Client, LoadBalancer, APIServer, Database, Cache, MessageQueue, Worker
 from simulation.events import Event, EventType
 from extensions import socketio
 
@@ -58,6 +58,23 @@ class SimulationInstance:
                     self.engine.register_component(comp)
                 elif ntype == "database":
                     comp = Database(nid, capacity=5, latency=0.2)
+                    self.engine.register_component(comp)
+                elif ntype == "cache":
+                    db_id = targets[0] if targets else None
+                    comp = Cache(nid, db_id=db_id, hit_rate=0.8, latency=0.01)
+                    self.engine.register_component(comp)
+                elif ntype == "queue":
+                    comp = MessageQueue(nid, max_depth=1000)
+                    for t in targets:
+                        comp.register_worker(t)
+                    self.engine.register_component(comp)
+                elif ntype == "worker":
+                    queue_id = "none"
+                    for qid, qtargets in adj.items():
+                        if nid in qtargets:
+                            queue_id = qid
+                            break
+                    comp = Worker(nid, queue_id=queue_id, capacity=5, latency=1.0)
                     self.engine.register_component(comp)
             self.state = SimState.CREATED
         except Exception as e:
