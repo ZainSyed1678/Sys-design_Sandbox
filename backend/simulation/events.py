@@ -1,11 +1,15 @@
 from enum import Enum
-from dataclasses import dataclass, field
 from typing import Any, Dict
+from dataclasses import dataclass, field
 
 class EventType(Enum):
     REQUEST_ARRIVED = "REQUEST_ARRIVED"
     REQUEST_COMPLETED = "REQUEST_COMPLETED"
-    
+    REQUEST_FAILED = "REQUEST_FAILED"
+    COMPONENT_FAILED = "COMPONENT_FAILED"
+    COMPONENT_RECOVERED = "COMPONENT_RECOVERED"
+    TRAFFIC_CHANGED = "TRAFFIC_CHANGED"
+
 @dataclass(order=True)
 class Event:
     time: float

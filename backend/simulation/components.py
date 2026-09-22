@@ -6,15 +6,29 @@ class BaseComponent:
     def __init__(self, id: str):
         self.id = id
         self.engine = None
+        self.is_healthy = True
         self.dropped = 0
         self.completed = 0
 
-    def handle_event(self, event: Event):
-        pass
+    def handle_event(self, event: Event) -> bool:
+        if event.type == EventType.COMPONENT_FAILED:
+            self.is_healthy = False
+            return False
+        elif event.type == EventType.COMPONENT_RECOVERED:
+            self.is_healthy = True
+            return False
+        
+        if not self.is_healthy and event.type == EventType.REQUEST_ARRIVED:
+            self.dropped += 1
+            if self.engine: self.engine.metrics["dropped"] += 1
+            return False
+            
+        return True
 
     def get_state(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "healthy": self.is_healthy,
             "dropped": self.dropped,
             "completed": self.completed
         }
@@ -27,6 +41,10 @@ class Client(BaseComponent):
         self.sent = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
+        
+        if event.type == EventType.TRAFFIC_CHANGED:
+            self.rate_per_sec = event.data.get("rate_per_sec", self.rate_per_sec)
         if event.type == EventType.REQUEST_ARRIVED:
             req_id = str(uuid.uuid4())
             self.sent += 1
@@ -55,6 +73,7 @@ class LoadBalancer(BaseComponent):
         self.index = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         if event.type == EventType.REQUEST_ARRIVED:
             if not self.backend_ids:
                 self.dropped += 1
@@ -80,6 +99,7 @@ class APIServer(BaseComponent):
         self.active_requests = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         if event.type == EventType.REQUEST_ARRIVED:
             if self.active_requests >= self.capacity:
                 self.dropped += 1
@@ -121,6 +141,7 @@ class Database(BaseComponent):
         self.active_requests = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         if event.type == EventType.REQUEST_ARRIVED:
             if self.active_requests >= self.capacity:
                 self.dropped += 1
@@ -162,6 +183,7 @@ class Cache(BaseComponent):
         self.misses = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         import random
         if event.type == EventType.REQUEST_ARRIVED:
             if random.random() < self.hit_rate:
@@ -209,6 +231,7 @@ class MessageQueue(BaseComponent):
         self.workers.append(worker_id)
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         if event.type == EventType.REQUEST_ARRIVED:
             if len(self.queue) >= self.max_depth:
                 self.dropped += 1
@@ -249,6 +272,7 @@ class Worker(BaseComponent):
         self.active_requests = 0
 
     def handle_event(self, event: Event):
+        if not super().handle_event(event): return
         if event.type == EventType.REQUEST_ARRIVED:
             self.active_requests += 1
             self.engine.schedule(Event(
