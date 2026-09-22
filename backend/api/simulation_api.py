@@ -7,12 +7,12 @@ simulation_bp = Blueprint('simulation', __name__)
 def start_simulation():
     data = request.json
     if not data or 'nodes' not in data:
-        return jsonify({"status": "error", "message": "No JSON graph given"}), 400
+        return jsonify({"status": "error", "message": "No JSON rock given"}), 400
         
     sim_id = sim_manager.create_simulation(data)
     sim = sim_manager.get_simulation(sim_id)
     
-    if not sim or sim.state.value == "FAILED":
+    if sim.state == "FAILED":
         return jsonify({"status": "error", "message": "Failed to build graph"}), 400
         
     sim.start()
@@ -34,3 +34,23 @@ def get_status(sim_id):
         return jsonify({"status": "error", "message": "Simulation not found"}), 404
         
     return jsonify({"status": "ok", "data": sim.get_metrics()})
+
+@simulation_bp.route('/<sim_id>/inject', methods=['POST'])
+def inject_chaos(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+        
+    data = request.json
+    target_id = data.get("target_id")
+    event_type = data.get("event_type")
+    event_data = data.get("data", {})
+    
+    if not target_id or not event_type:
+        return jsonify({"status": "error", "message": "Need target_id and event_type"}), 400
+        
+    success = sim.inject_event(target_id, event_type, event_data)
+    if success:
+        return jsonify({"status": "ok"})
+    else:
+        return jsonify({"status": "error", "message": "Bad rock or math not running"}), 400

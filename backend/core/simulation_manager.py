@@ -123,6 +123,22 @@ class SimulationInstance:
             "components": self.engine.get_component_states()
         }
 
+    def inject_event(self, target_id: str, event_type: str, data: Dict[str, Any] = None):
+        if self.state != SimState.RUNNING:
+            return False
+        if not data: data = {}
+        try:
+            etype = EventType(event_type)
+            self.engine.schedule(Event(
+                time=self.engine.time,
+                type=etype,
+                target_id=target_id,
+                data=data
+            ))
+            return True
+        except ValueError:
+            return False
+
 class SimulationManager:
     def __init__(self):
         self.simulations: Dict[str, SimulationInstance] = {}
