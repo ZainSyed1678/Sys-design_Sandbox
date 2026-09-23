@@ -8,6 +8,7 @@ from simulation.engine import SimulationEngine
 from simulation.components import Client, LoadBalancer, APIServer, Database, Cache, MessageQueue, Worker
 from simulation.events import Event, EventType
 from extensions import socketio
+from core.analyzer import analyzer
 
 class SimState(Enum):
     CREATED = "CREATED"
@@ -89,11 +90,15 @@ class SimulationInstance:
             step_until = self.engine.time + 0.5
             self.engine.run(until=step_until)
             
+            states = self.engine.get_component_states()
+            analysis = analyzer.analyze(states, self.engine.metrics)
+            
             socketio.emit('METRICS_UPDATE', {
                 'sim_id': self.sim_id,
                 'time': self.engine.time,
                 'metrics': self.engine.metrics,
-                'components': self.engine.get_component_states()
+                'components': states,
+                'analysis': analysis
             })
             
             time.sleep(0.5)
