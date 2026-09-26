@@ -157,22 +157,5 @@ Test suite includes:
 
 ---
 
-## Project Roadmap
-
-- [x] **Phase 0:** Project scaffolding & containerized dev environment.
-- [x] **Phase 1:** Visual architecture canvas (React Flow).
-- [x] **Phase 2:** Discrete event simulation engine MVP.
-- [x] **Phase 3:** Threaded simulation manager & lifecycle API.
-- [x] **Phase 4:** Real-time WebSockets streaming & live metric gauges.
-- [x] **Phase 5:** Advanced components (Cache, Message Queue, Worker).
-- [x] **Phase 6:** Chaos engineering, failure injection & deterministic seeding.
-- [x] **Phase 7:** Deterministic bottleneck analysis & recommendation engine.
-- [x] **LLD Studio:** Low-level object-oriented design & live code generator.
-- [ ] **Phase 8:** AI System Design Mentor (LLM-guided architectural trade-off feedback).
-- [ ] **Phase 9:** Production hardening (WSGI/Gunicorn, Nginx reverse proxy).
-- [ ] **Phase 10:** Cloud deployment & CI/CD automation.
-
----
-
 ## License
 MIT License. Created for interactive systems engineering and software architecture education.
