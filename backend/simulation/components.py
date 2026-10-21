@@ -3,6 +3,9 @@ from typing import List, Optional, Dict, Any
 from .events import Event, EventType
 from .distributions import Distribution, DistributionType
 from .resilience import CircuitBreaker, TokenBucket, RetryPolicy
+from .traffic import TrafficProfile, TrafficPatternType
+from .cache_model import AdvancedCacheModel
+from .load_balancer import LoadBalancerSelector, LoadBalancingStrategy
 from .engine import calculate_percentiles
 
 class BaseComponent:
@@ -164,6 +167,7 @@ class Client(BaseComponent):
         rate_per_sec: float = 10.0,
         arrival_dist: Optional[Distribution] = None,
         arrival_process: Optional[str] = None,
+        traffic_profile: Optional[TrafficProfile] = None,
         timeout: Optional[float] = None,
         retry_policy: Optional[RetryPolicy] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
@@ -172,14 +176,18 @@ class Client(BaseComponent):
         super().__init__(id)
         self.target_id = target_id
         self.rate_per_sec = max(1e-9, float(rate_per_sec))
-        if arrival_dist is not None:
-            self.arrival_dist = arrival_dist
-        elif arrival_process == "poisson":
-            self.arrival_dist = Distribution(DistributionType.EXPONENTIAL, mean=1.0 / self.rate_per_sec)
-        elif arrival_process == "constant":
-            self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
+        self.traffic_profile = traffic_profile
+        if self.traffic_profile is None:
+            if arrival_dist is not None:
+                self.arrival_dist = arrival_dist
+            elif arrival_process == "poisson":
+                self.arrival_dist = Distribution(DistributionType.EXPONENTIAL, mean=1.0 / self.rate_per_sec)
+            elif arrival_process == "constant":
+                self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
+            else:
+                self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
         else:
-            self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
+            self.arrival_dist = None
 
         # Resilience policies
         self.timeout = float(timeout) if timeout is not None else None
@@ -221,7 +229,10 @@ class Client(BaseComponent):
 
             # Schedule next client request
             if self.engine:
-                interval = self.arrival_dist.sample(self.engine.rng)
+                if self.traffic_profile is not None:
+                    interval = self.traffic_profile.next_interval(self.engine.time, self.engine.rng)
+                else:
+                    interval = self.arrival_dist.sample(self.engine.rng)
                 self.engine.schedule(Event(
                     time=self.engine.time + interval,
                     type=EventType.REQUEST_ARRIVED,
@@ -337,26 +348,35 @@ class Client(BaseComponent):
 
 
 class LoadBalancer(BaseComponent):
-    def __init__(self, id: str, backend_ids: List[str], strategy: str = "round_robin"):
+    def __init__(
+        self,
+        id: str,
+        backend_ids: List[str],
+        strategy: str = "round_robin",
+        weights: Optional[Dict[str, float]] = None,
+        virtual_nodes: int = 50,
+    ):
         super().__init__(id)
         self.backend_ids = list(backend_ids)
         self.strategy = strategy
-        self.index = 0
+        self.selector = LoadBalancerSelector(
+            strategy=strategy,
+            backend_ids=self.backend_ids,
+            weights=weights,
+            virtual_nodes=virtual_nodes,
+        )
 
     def handle_event(self, event: Event):
         if not super().handle_event(event):
             return
         if event.type == EventType.REQUEST_ARRIVED:
-            if not self.backend_ids:
+            target = self.selector.select(self.engine, event.data)
+            if not target:
                 self.dropped += 1
                 if self.engine:
                     self.engine.record_request_dropped(event.data, self.id, "no_backends")
                 return
 
-            target = self.backend_ids[self.index]
-            self.index = (self.index + 1) % len(self.backend_ids)
-
-            # Check network partition between LB and backend
             if self.engine and self.engine.is_partitioned(self.id, target):
                 self.dropped += 1
                 self.engine.record_request_dropped(event.data, self.id, "network_partition")
@@ -370,6 +390,12 @@ class LoadBalancer(BaseComponent):
                     target_id=target,
                     data=event.data,
                 ))
+
+    def get_state(self) -> Dict[str, Any]:
+        state = super().get_state()
+        state["strategy"] = self.strategy
+        state["backend_count"] = len(self.backend_ids)
+        return state
 
 
 class APIServer(BaseComponent):
@@ -692,23 +718,51 @@ class Database(BaseComponent):
 
 
 class Cache(BaseComponent):
-    def __init__(self, id: str, db_id: Optional[str] = None, hit_rate: float = 0.8, latency: float = 0.01):
+    def __init__(
+        self,
+        id: str,
+        db_id: Optional[str] = None,
+        hit_rate: float = 0.8,
+        latency: float = 0.01,
+        capacity: int = 1000,
+        ttl: float = 30.0,
+        warmup_duration: float = 5.0,
+    ):
         super().__init__(id)
         self.db_id = db_id
         self.hit_rate = float(hit_rate)
         self.latency = float(latency)
+        self.cache_model = AdvancedCacheModel(
+            capacity=capacity,
+            default_ttl=ttl,
+            hit_rate=hit_rate,
+            warmup_duration=warmup_duration,
+        )
         self.hits = 0
         self.misses = 0
 
     def handle_event(self, event: Event):
+        if event.type == EventType.COMPONENT_RECOVERED:
+            super().handle_event(event)
+            # Cold restart after recovery
+            if self.engine:
+                self.cache_model.reset_cold(self.engine.time)
+            return
+
         if not super().handle_event(event):
             return
 
         if event.type == EventType.REQUEST_ARRIVED:
             rng_roll = self.engine.rng.random() if self.engine else 0.5
             eff_latency = self.latency * self.latency_multiplier
-            if rng_roll < self.hit_rate:
-                self.hits += 1
+            curr_time = self.engine.time if self.engine else 0.0
+
+            # Evaluate hit taking cold-start stampede into account
+            is_hit = self.cache_model.check_hit_probabilistic(curr_time, rng_roll)
+            self.hits = self.cache_model.hits
+            self.misses = self.cache_model.misses
+
+            if is_hit:
                 self.completed += 1
                 if self.engine:
                     target = event.data.get("api_id") or self.id
@@ -720,7 +774,6 @@ class Cache(BaseComponent):
                         data=event.data,
                     ))
             else:
-                self.misses += 1
                 if self.db_id and self.engine:
                     event.data["source"] = self.id
                     self.engine.schedule(Event(
@@ -748,11 +801,15 @@ class Cache(BaseComponent):
 
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
-        state["hits"] = self.hits
-        state["misses"] = self.misses
+        curr_time = self.engine.time if self.engine else 0.0
+        c_state = self.cache_model.get_state(curr_time)
+        state["hits"] = c_state["hits"]
+        state["misses"] = c_state["misses"]
         state["hit_rate"] = self.hit_rate
-        total = self.hits + self.misses
-        state["observed_hit_rate"] = round(self.hits / total, 4) if total > 0 else 0.0
+        state["observed_hit_rate"] = c_state["observed_hit_rate"]
+        state["effective_hit_rate"] = c_state["effective_hit_rate"]
+        state["is_warming_up"] = c_state["is_warming_up"]
+        state["evictions"] = c_state["evictions"]
         return state
 
 

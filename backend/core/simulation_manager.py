@@ -6,8 +6,10 @@ from typing import Dict, Any, Optional
 
 from simulation.engine import SimulationEngine
 from simulation.components import Client, LoadBalancer, APIServer, Database, Cache, MessageQueue, Worker
+from simulation.rich_components import ReadReplicaDatabase, ShardedDatabase, CDN, APIGateway, AutoscalingGroup
 from simulation.distributions import Distribution, DistributionType
 from simulation.resilience import CircuitBreaker, TokenBucket, RetryPolicy
+from simulation.traffic import TrafficProfile
 from simulation.events import Event, EventType
 from extensions import socketio
 from core.analyzer import analyzer
@@ -89,7 +91,8 @@ class SimulationInstance:
 
                 elif ntype == "load_balancer":
                     strategy = data.get("strategy", "round_robin")
-                    comp = LoadBalancer(nid, backend_ids=targets, strategy=strategy)
+                    weights = data.get("weights")
+                    comp = LoadBalancer(nid, backend_ids=targets, strategy=strategy, weights=weights)
                     self.engine.register_component(comp)
 
                 elif ntype == "api":
@@ -172,6 +175,43 @@ class SimulationInstance:
                     dist_type = data.get("distribution", DistributionType.CONSTANT.value)
                     service_dist = Distribution(dist_type, mean=latency)
                     comp = Worker(nid, queue_id=queue_id, concurrency=concurrency, latency=latency, service_dist=service_dist)
+                    self.engine.register_component(comp)
+
+                elif ntype in ("cdn", "edge_cache"):
+                    origin = targets[0] if targets else "none"
+                    hit_rate = float(data.get("hit_rate", 0.9))
+                    edge_lat = float(data.get("latency", 0.005))
+                    comp = CDN(nid, origin_id=origin, hit_rate=hit_rate, edge_latency=edge_lat)
+                    self.engine.register_component(comp)
+
+                elif ntype == "api_gateway":
+                    default_target = targets[0] if targets else "none"
+                    routes = data.get("routes", {})
+                    tb = None
+                    if data.get("rate_limit"):
+                        tb = TokenBucket(
+                            capacity=float(data.get("rate_limit_capacity", 100)),
+                            refill_rate=float(data.get("rate_limit_refill", 50)),
+                        )
+                    comp = APIGateway(nid, routes=routes, default_target=default_target, rate_limiter=tb)
+                    self.engine.register_component(comp)
+
+                elif ntype in ("sharded_database", "sharded_db"):
+                    comp = ShardedDatabase(nid, shard_ids=targets)
+                    self.engine.register_component(comp)
+
+                elif ntype in ("read_replica", "replicated_db"):
+                    primary = targets[0] if targets else "none"
+                    replicas = targets[1:] if len(targets) > 1 else []
+                    lag = float(data.get("replication_lag", 0.1))
+                    comp = ReadReplicaDatabase(nid, primary_id=primary, replica_ids=replicas, replication_lag=lag)
+                    self.engine.register_component(comp)
+
+                elif ntype in ("autoscaler", "autoscaling_group"):
+                    target_comp = targets[0] if targets else "none"
+                    min_cap = int(data.get("min_capacity", 2))
+                    max_cap = int(data.get("max_capacity", 10))
+                    comp = AutoscalingGroup(nid, target_component_id=target_comp, min_capacity=min_cap, max_capacity=max_cap)
                     self.engine.register_component(comp)
 
             self.state = SimState.CREATED

@@ -2,6 +2,26 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 4 — Richer Components and Traffic] - 2026-10-21
+
+### Completed
+- **Advanced Load Balancing Strategies (`backend/simulation/load_balancer.py`):**
+  - Implemented `round_robin`, `least_connections`, `weighted`, `random`, and `consistent_hashing`.
+  - Built `ConsistentHashRing` with virtual nodes to minimize rehash key movement.
+- **New Distributed Infrastructure Components (`backend/simulation/rich_components.py`):**
+  - **`ReadReplicaDatabase`:** Read/Write splitting directing writes to primary and reads to replicas with asynchronous replication lag.
+  - **`ShardedDatabase`:** Deterministic MD5 hash partitioning distributing data across database shards.
+  - **`CDN`:** Edge cache layer with high hit rates and low latency, routing misses to origin.
+  - **`APIGateway`:** Path-prefix request routing and token bucket rate limiting.
+  - **`AutoscalingGroup`:** Automatic capacity scaling triggered by utilization thresholds with configurable startup delay and cooldowns.
+- **Cache Lifecycle & Stampede Modeling (`backend/simulation/cache_model.py`):**
+  - Fixed-capacity LRU eviction queue and TTL key expiration.
+  - Cold-start restart period modeling cache stampede onto downstream databases.
+- **Realistic Traffic Profiles (`backend/simulation/traffic.py`):**
+  - Configurable traffic patterns: `CONSTANT`, `POISSON`, `RAMP`, `STEP_SPIKE`, `DIURNAL_SINE`, and `BURSTY` (on/off cycles).
+- **Unit Test Suite (`backend/tests/test_rich_components.py`):**
+  - Added 12 comprehensive unit tests covering all 5 load balancer strategies, read replicas, sharding, CDN, API gateways, autoscaling, cache eviction/TTL, and traffic patterns.
+
 ## [Phase 3 — Failure Modeling (Retries, Timeouts, Circuit Breakers)] - 2026-10-21
 
 ### Completed
