@@ -2,6 +2,41 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 5 — Analysis and Comparison] - 2026-10-21
+
+### Completed
+- **Evidence-Based Bottleneck Rules (`backend/core/analyzer.py`):**
+  - Enhanced rule engine to produce structured findings with metric evidence, node IDs, time windows, and severity ratings (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`).
+  - Added 10 deterministic architectural flaw detectors:
+    1. Capacity Saturation / Dropped Requests
+    2. Queue Overflow / Backpressure
+    3. Node Outage / Failure
+    4. Retry Storm Load Amplification
+    5. Missing Downstream Timeouts
+    6. Missing Circuit Breaker on Dependency
+    7. Cold-Start Cache Stampede Risk
+    8. Hot Shard / Partition Skew
+    9. Replication Lag
+    10. Single Point of Failure (SPOF)
+- **Architecture Compare Mode (`backend/core/comparator.py`):**
+  - Deterministic side-by-side execution of two architectures under identical PRNG seeds and traffic workloads.
+  - Comparative metrics extraction: throughput, p50/p95/p99 latency percentiles, drop rate, cost, and automated verdict synthesis.
+  - Added REST endpoint `POST /api/simulation/compare`.
+- **Infrastructure Cost Model (`backend/core/cost_model.py`):**
+  - Configurable hourly component pricing with documented cloud instance defaults.
+  - Computes hourly total, monthly projection, and per-type breakdown with explicit estimation disclaimer.
+  - Added REST endpoint `POST /api/simulation/cost`.
+- **Guided Scenario Presets (`backend/core/presets.py`):**
+  - Pre-configured topologies with guided steps and expected outcomes:
+    1. `url_shortener`: Read-heavy cache-aside pattern.
+    2. `social_timeline`: Asynchronous feed fanout with message queues and read replicas.
+    3. `black_friday_spike`: 5x traffic surge with autoscaling absorption.
+    4. `cache_stampede`: Cold-start thundering herd and database collapse.
+  - Added REST endpoints `GET /api/simulation/presets` and `GET /api/simulation/presets/<preset_id>`.
+- **Comprehensive Unit & API Testing (`backend/tests/test_analyzer.py`, `backend/tests/test_comparison_and_cost.py`):**
+  - 10 analyzer unit tests covering all flaw detection rules and evidence schemas.
+  - 4 comparison, cost model, and Flask API integration tests.
+
 ## [Phase 4 — Richer Components and Traffic] - 2026-10-21
 
 ### Completed
