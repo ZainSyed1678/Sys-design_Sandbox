@@ -220,25 +220,6 @@ Current test suite covers:
 
 ---
 
-## Repository Settings & Manual Maintenance
-
-### GitHub Topics (Manual Configuration in GitHub Repo Settings)
-Please ensure the repository topics on GitHub are configured with the following tags:
-- `system-design`
-- `distributed-systems` (corrected from typo `destributed-systems`)
-- `discrete-event-simulation`
-- `react`
-- `typescript`
-- `python`
-- `flask`
-- `software-architecture`
-
-### Repository Renaming
-- Target repository name: `system-design-simulator` (currently `Sys-design_Sandbox`).
-- Please perform this rename manually via GitHub Repository Settings ➔ General ➔ Repository Name.
-
----
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
