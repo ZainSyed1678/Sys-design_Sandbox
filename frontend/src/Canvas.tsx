@@ -14,6 +14,8 @@ import ReactFlow, {
 import { io } from 'socket.io-client';
 import { InfrastructureNode } from './nodes/InfrastructureNode';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const nodeTypes = {
   infra: InfrastructureNode,
 };
@@ -21,17 +23,7 @@ const nodeTypes = {
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 let id = 0;
-const getId = () => `dndnode_${id++}`;
-
-const TUTORIAL_TEXT = `
-Grog's Guide to System Design!
-1. Draw Boxes: Click buttons on the left to add boxes.
-2. Connect Boxes: Drag lines from bottom dots to top dots.
-3. Start Math: Click "Start Fast Magic".
-4. Break Things: Click a box on the grid, then click "Kill Box" at the top.
-5. Fix Things: Click "Fix Box".
-6. Delete Box: Click a box and click "Delete Box".
-`;
+const getId = () => `node_${id++}`;
 
 export default function Canvas() {
   const [nodes, setNodes] = useState<Node[]>(initialNodes);
@@ -39,10 +31,9 @@ export default function Canvas() {
   const [simId, setSimId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<{warnings: string[], recommendations: string[]} | null>(null);
-  const [showTutorial, setShowTutorial] = useState(false);
 
   useEffect(() => {
-    const socket = io('http://localhost:5000');
+    const socket = io(API_URL);
     socket.on('METRICS_UPDATE', (data) => {
       if (data.sim_id === simId || !simId) {
         setNodes((nds) => 
@@ -101,7 +92,7 @@ export default function Canvas() {
   const startSimulation = async () => {
     const graph = { nodes, edges };
     try {
-      const res = await fetch('http://localhost:5000/api/simulation/start', {
+      const res = await fetch(`${API_URL}/api/simulation/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(graph),
@@ -111,22 +102,22 @@ export default function Canvas() {
         setSimId(data.sim_id);
         setAnalysis(null);
       } else {
-        alert('Grog say: Bad Math! ' + data.message);
+        alert('Simulation Error: ' + data.message);
       }
     } catch (e) {
-      alert('Brain is dead. Cannot start math.');
+      alert('Backend connection error: unable to reach the simulation server at ' + API_URL);
     }
   };
 
   const stopSimulation = async () => {
     if (!simId) return;
-    await fetch(`http://localhost:5000/api/simulation/${simId}/stop`, { method: 'POST' });
+    await fetch(`${API_URL}/api/simulation/${simId}/stop`, { method: 'POST' });
     setSimId(null);
   };
 
   const injectChaos = async (type: string) => {
     if (!simId || !selectedNodeId) return;
-    await fetch(`http://localhost:5000/api/simulation/${simId}/inject`, {
+    await fetch(`${API_URL}/api/simulation/${simId}/inject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target_id: selectedNodeId, event_type: type })
@@ -146,15 +137,15 @@ export default function Canvas() {
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden', width: '100%', height: '100%' }}>
       <div className="sidebar-left">
         <button className="sidebar-btn" onClick={() => addNode('client', 'Client')}>+ Client <span className="badge">{nodeCounts['client'] || 0}</span></button>
-        <button className="sidebar-btn" onClick={() => addNode('load_balancer', 'LB')}>+ Load Balancer <span className="badge">{nodeCounts['load_balancer'] || 0}</span></button>
-        <button className="sidebar-btn" onClick={() => addNode('api', 'API Server')}>+ API <span className="badge">{nodeCounts['api'] || 0}</span></button>
-        <button className="sidebar-btn" onClick={() => addNode('database', 'Database')}>+ DB <span className="badge">{nodeCounts['database'] || 0}</span></button>
+        <button className="sidebar-btn" onClick={() => addNode('load_balancer', 'Load Balancer')}>+ Load Balancer <span className="badge">{nodeCounts['load_balancer'] || 0}</span></button>
+        <button className="sidebar-btn" onClick={() => addNode('api', 'API Server')}>+ API Server <span className="badge">{nodeCounts['api'] || 0}</span></button>
+        <button className="sidebar-btn" onClick={() => addNode('database', 'Database')}>+ Database <span className="badge">{nodeCounts['database'] || 0}</span></button>
         <button className="sidebar-btn" onClick={() => addNode('cache', 'Cache')}>+ Cache <span className="badge">{nodeCounts['cache'] || 0}</span></button>
         <button className="sidebar-btn" onClick={() => addNode('queue', 'Queue')}>+ Queue <span className="badge">{nodeCounts['queue'] || 0}</span></button>
         <button className="sidebar-btn" onClick={() => addNode('worker', 'Worker')}>+ Worker <span className="badge">{nodeCounts['worker'] || 0}</span></button>
         
         <div style={{ marginTop: 'auto' }}>
-          <button className="sidebar-btn magic-btn" onClick={startSimulation}>Start Fast Magic</button>
+          <button className="sidebar-btn primary-btn magic-btn" onClick={startSimulation}>Start Simulation</button>
           <button className="sidebar-btn stop-btn" onClick={stopSimulation}>Stop</button>
         </div>
       </div>
@@ -163,9 +154,9 @@ export default function Canvas() {
         {selectedNodeId && (
           <div className="floating-toolbar">
             <span>Selected: {selectedNodeId}</span>
-            <button onClick={() => injectChaos('COMPONENT_FAILED')} className="danger-btn">Kill Box</button>
-            <button onClick={() => injectChaos('COMPONENT_RECOVERED')} className="safe-btn">Fix Box</button>
-            <button onClick={deleteSelectedNode} className="danger-btn" style={{ marginLeft: 10 }}>Delete Box</button>
+            <button onClick={() => injectChaos('COMPONENT_FAILED')} className="danger-btn">Fail Node</button>
+            <button onClick={() => injectChaos('COMPONENT_RECOVERED')} className="safe-btn">Recover Node</button>
+            <button onClick={deleteSelectedNode} className="danger-btn" style={{ marginLeft: 10 }}>Delete Node</button>
           </div>
         )}
         <ReactFlow
@@ -185,12 +176,12 @@ export default function Canvas() {
       </div>
       
       <div className="sidebar-right">
-        <h2>Grog Analysis</h2>
+        <h2>Architecture Analysis</h2>
         {analysis ? (
           <>
             {analysis.warnings.length > 0 && (
               <div className="analysis-box warnings">
-                <h3 style={{ marginTop: 0 }}>Warnings! ⚠</h3>
+                <h3 style={{ marginTop: 0 }}>System Warnings ⚠</h3>
                 <ul style={{ margin: 0, paddingLeft: '20px' }}>
                   {analysis.warnings.map((w, i) => <li key={i}>{w}</li>)}
                 </ul>
@@ -198,7 +189,7 @@ export default function Canvas() {
             )}
             {analysis.recommendations.length > 0 && (
               <div className="analysis-box recs">
-                <h3 style={{ marginTop: 0 }}>Grog Says:</h3>
+                <h3 style={{ marginTop: 0 }}>System Recommendations:</h3>
                 <ul style={{ margin: 0, paddingLeft: '20px' }}>
                   {analysis.recommendations.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
@@ -206,7 +197,7 @@ export default function Canvas() {
             )}
           </>
         ) : (
-          <p style={{ color: '#888' }}>Math is good. Grog is sleeping.</p>
+          <p style={{ color: '#888' }}>System is stable. No active bottlenecks detected.</p>
         )}
       </div>
     </div>

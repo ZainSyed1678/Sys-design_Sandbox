@@ -202,7 +202,7 @@ export function LLDCanvas() {
         </button>
 
         <div style={{ marginTop: 'auto', background: '#1e1e24', padding: '10px', borderRadius: '6px', fontSize: '0.78rem', color: '#aaa', border: '1px solid #3a3a48' }}>
-          💡 <strong>Tip:</strong> Click any box on the canvas to edit its methods, fields, and view code skeleton.
+          💡 <strong>Tip:</strong> Click any component on the canvas to configure specifications and view generated code.
         </div>
       </div>
 
@@ -211,7 +211,7 @@ export function LLDCanvas() {
         {selectedNodeId && (
           <div className="floating-toolbar">
             <span>Selected: <strong>{selectedNode?.data.label}</strong></span>
-            <button onClick={deleteSelectedNode} className="danger-btn">Delete Box</button>
+            <button onClick={deleteSelectedNode} className="danger-btn">Delete Node</button>
           </div>
         )}
 

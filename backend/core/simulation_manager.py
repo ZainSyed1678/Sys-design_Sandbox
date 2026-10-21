@@ -79,7 +79,8 @@ class SimulationInstance:
                     self.engine.register_component(comp)
             self.state = SimState.CREATED
         except Exception as e:
-            print("Grog broke building graph:", e)
+            import logging
+            logging.getLogger(__name__).error("Failed building topology graph: %s", e)
             self.state = SimState.FAILED
 
     def _run_loop(self):

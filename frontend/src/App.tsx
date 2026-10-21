@@ -3,19 +3,20 @@ import Canvas from './Canvas';
 import { LLDCanvas } from './LLDCanvas';
 
 const TUTORIAL_TEXT = `
-Grog's Guide to System Design!
+System Design Simulator — User Guide
 
-1. High Level System Design (HLD):
-   - Click "+ Client", "+ API", "+ Database" to draw infrastructure.
-   - Drag lines to connect boxes.
-   - Click "Start Fast Magic" to run real-time traffic and queue simulation.
-   - Click any box and click "Kill Box" to simulate server or database outages and watch cascading failures.
+1. High-Level System Design (HLD) Mode:
+   - Add Nodes: Select components from the left sidebar (Client, Load Balancer, API Server, Database, Cache, Message Queue, Worker).
+   - Connect Services: Drag connectors between component handles to establish traffic routing.
+   - Run Simulation: Click "Start Simulation" to initiate discrete-event request flow.
+   - Inject Failures: Select a node and click "Fail Node" to test cascading degradation and backpressure.
+   - Analysis: Monitor the Architecture Analysis panel on the right for real-time bottleneck detection.
 
-2. Low Level System Design (LLD):
-   - Click "Low Level System Design" button on the top right.
-   - Add Class, Interface, Service, Repository, Controller, or Design Pattern.
-   - Click any box to open the Specifications Drawer.
-   - Add attributes, methods, parameters, and view generated TypeScript / Python code skeletons!
+2. Low-Level System Design (LLD) Mode:
+   - Click "Low Level System Design" in the top-right mode switcher.
+   - Model object-oriented architectures using Classes, Interfaces, Services, Repositories, and Design Patterns.
+   - Open the Specifications Drawer on any selected component to define attributes and methods.
+   - Inspect and export automatically generated TypeScript and Python code skeletons.
 `;
 
 function App() {
@@ -27,9 +28,9 @@ function App() {
       {/* Universal Topbar */}
       <header className="topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <h2>Grog System Simulator</h2>
+          <h2>System Design Simulator</h2>
           <button onClick={() => setShowTutorial(true)} className="btn-tutorial">
-            How to use Cave
+            Simulator Guide
           </button>
         </div>
 
@@ -60,14 +61,14 @@ function App() {
         </div>
       </main>
 
-      {/* Beginner Tutorial Modal */}
+      {/* Guide Modal */}
       {showTutorial && (
         <div className="modal-overlay" onClick={() => setShowTutorial(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Grog's Tutorial</h2>
+            <h2>System Design Simulator Guide</h2>
             <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{TUTORIAL_TEXT}</pre>
             <button className="safe-btn" onClick={() => setShowTutorial(false)}>
-              Ugh! I understand
+              Close Guide
             </button>
           </div>
         </div>

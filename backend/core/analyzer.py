@@ -5,39 +5,29 @@ class Analyzer:
         warnings = []
         recommendations = []
         
-        # Count types for SPOF
-        types_count = {}
-        
         for cid, state in components.items():
-            ctype = state.get("type", "unknown")
-            types_count[ctype] = types_count.get(ctype, 0) + 1
-            
-            # Check drops
+            # Check dropped requests
             dropped = state.get("dropped", 0)
             if dropped > 0:
-                warnings.append(f"Box '{cid}' dropped {dropped} rocks!")
-                recommendations.append(f"Make capacity of '{cid}' bigger, or fix boxes it talks to.")
+                warnings.append(f"Node '{cid}' dropped {dropped} requests due to capacity saturation.")
+                recommendations.append(f"Increase concurrency capacity of '{cid}', or scale dependent services.")
                 
-            # Check queue
+            # Check queue backpressure
             if "queue_depth" in state:
                 depth = state["queue_depth"]
                 max_d = state["max_depth"]
                 if depth > max_d * 0.8:
-                    warnings.append(f"Queue '{cid}' is very full! ({depth}/{max_d})")
-                    recommendations.append(f"Add more Workers for '{cid}' to smash rocks faster.")
+                    warnings.append(f"Message Queue '{cid}' buffer threshold exceeded ({depth}/{max_d}).")
+                    recommendations.append(f"Scale worker concurrency or add worker nodes for queue '{cid}'.")
                     
-            # Check health
+            # Check node health
             if not state.get("healthy", True):
-                warnings.append(f"Box '{cid}' is dead!")
+                warnings.append(f"Node '{cid}' has failed.")
+                recommendations.append(f"Restore node '{cid}' or deploy redundant failover replicas.")
                 
-        # Check SPOF (very simple caveman rule)
-        # We don't know the types perfectly because components.py state doesn't have it, 
-        # so we look at class name or just assume if only 1 thing has capacity, it's SPOF.
-        # Actually, let's look at active/capacity. If any box is single, warn.
-        
         return {
             "warnings": warnings,
-            "recommendations": list(set(recommendations))
+            "recommendations": sorted(list(set(recommendations)))
         }
 
 analyzer = Analyzer()

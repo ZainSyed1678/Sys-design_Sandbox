@@ -18,8 +18,8 @@ def test_analyzer_detects_overloaded_component():
     result = analyzer.analyze(components, metrics)
     
     assert len(result["warnings"]) > 0
-    assert any("dropped 15 rocks" in w for w in result["warnings"])
-    assert any("Make capacity of 'api_1' bigger" in r for r in result["recommendations"])
+    assert any("dropped 15 requests" in w for w in result["warnings"])
+    assert any("Increase concurrency capacity of 'api_1'" in r for r in result["recommendations"])
 
 def test_analyzer_detects_queue_overflow():
     analyzer = Analyzer()
@@ -37,8 +37,8 @@ def test_analyzer_detects_queue_overflow():
     
     result = analyzer.analyze(components, metrics)
     
-    assert any("is very full" in w for w in result["warnings"])
-    assert any("Add more Workers" in r for r in result["recommendations"])
+    assert any("buffer threshold exceeded" in w for w in result["warnings"])
+    assert any("Scale worker concurrency" in r for r in result["recommendations"])
 
 def test_analyzer_detects_dead_component():
     analyzer = Analyzer()
@@ -54,4 +54,4 @@ def test_analyzer_detects_dead_component():
     
     result = analyzer.analyze(components, metrics)
     
-    assert any("is dead" in w for w in result["warnings"])
+    assert any("has failed" in w for w in result["warnings"])

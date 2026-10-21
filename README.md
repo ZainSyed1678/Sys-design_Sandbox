@@ -1,38 +1,40 @@
-# System Design Simulator & Sandbox (HLD & LLD)
+# System Design Simulator
 
-An interactive, real-time distributed system design sandbox where engineers visually design, simulate, stress-test, and analyze software architectures. 
+An interactive, real-time distributed system design sandbox where engineers visually design, simulate, stress-test, and analyze software architectures.
 
-The platform supports both **High-Level System Design (HLD)** (distributed infrastructure, discrete-event simulation, chaos injection, bottleneck analysis) and **Low-Level System Design (LLD)** (UML object-oriented modeling, class specifications, and real-time code generation).
+The platform provides dual-mode modeling:
+- **High-Level System Design (HLD):** Visual infrastructure composition, discrete-event queueing simulation, live WebSockets streaming, chaos fault injection, and automated bottleneck analysis.
+- **Low-Level System Design (LLD):** Object-oriented UML component modeling, contracts, specifications editing, and real-time TypeScript & Python code generation.
 
 ---
 
 ## Key Features
 
-### 🌐 1. High-Level System Design (HLD) Simulator
+### 1. High-Level System Design (HLD) Simulator
 - **Interactive Visual Canvas:** Drag, connect, and configure infrastructure components using React Flow.
 - **Components Supported:**
-  - **Client:** Configurable request generation rates (req/sec).
-  - **Load Balancer:** Round-robin request routing across backend targets.
-  - **API Server:** Configurable concurrency capacity and processing latency.
-  - **Database:** Disk/transaction processing latency with connection limits.
-  - **Cache:** Configurable hit/miss ratio (e.g. 80% hit rate) and low latency lookups.
-  - **Message Queue:** Buffer depth thresholds and backpressure control.
-  - **Worker:** Asynchronous queue consumers handling background jobs.
+  - **Client:** Configurable request generation rates (requests/sec).
+  - **Load Balancer:** Round-robin request distribution across backend endpoints.
+  - **API Server:** Concurrency capacity limits and processing latency.
+  - **Database:** Processing latency and connection limits.
+  - **Cache:** Hit/miss ratio simulation (e.g. 80% hit rate) and low-latency responses.
+  - **Message Queue:** FIFO buffer with queue depth limits and backpressure tracking.
+  - **Worker:** Asynchronous queue consumers processing background jobs.
 - **Discrete Event Simulation Engine:**
-  - Standalone engine decoupled from the web framework, using a priority queue (`heapq`) and simulated virtual time.
+  - Fully decoupled engine using a priority queue (`heapq`) and simulated virtual time.
   - Deterministic replay support via seedable pseudorandom generation.
 - **Real-Time Streaming:**
   - Live metric broadcasts over WebSockets (`Flask-SocketIO`).
-  - Visual node indicators: real-time active requests, capacity utilization bars, completed requests, and dropped requests.
+  - Visual node indicators: active requests, capacity utilization gauges, completed requests, and dropped requests.
 - **Chaos Engineering & Failure Injection:**
-  - Kill or recover individual components live during simulation.
-  - Observe cascading downstream failures (e.g., database failure causing API server connection saturation and request drops).
-- **Deterministic Bottleneck Analysis Engine:**
-  - Analyzes component metrics and graph topology in real time.
-  - Detects overloaded nodes, queue overflows, single points of failure (SPOF), and dead downstream dependencies.
-  - Emits actionable architectural recommendations.
+  - Fail or recover individual components live during simulation.
+  - Observe cascading downstream failures (e.g., database failure causing upstream API queue saturation and request drops).
+- **Architecture Analysis Engine:**
+  - Real-time heuristic evaluation of component utilization and topology.
+  - Detects overloaded nodes, queue overflows, single points of failure, and dead dependencies.
+  - Emits actionable architectural remediation recommendations.
 
-### 🧩 2. Low-Level System Design (LLD) Studio
+### 2. Low-Level System Design (LLD) Studio
 - **Dual-Mode Switcher:** Seamlessly toggle between High-Level Design (HLD) and Low-Level Design (LLD) without losing canvas state.
 - **Object-Oriented Building Blocks:**
   - `Class` (concrete & abstract classes)
@@ -59,7 +61,7 @@ The platform supports both **High-Level System Design (HLD)** (distributed infra
 │  ┌─────────────────────────┐ ┌──────────────────────┐  │
 │  │    HLD Canvas (ReactFlow)│ │   LLD Canvas (React) │  │
 │  │  - Infrastructure Nodes │ │ - UML Class Nodes    │  │
-│  │  - Metrics & Chaos Bars │ │ - Spec Drawer / Code │  │
+│  │  - Metrics & Gauges     │ │ - Spec Drawer / Code │  │
 │  └────────────▲────────────┘ └──────────────────────┘  │
 └───────────────┼────────────────────────────────────────┘
                 │ HTTP API & WebSockets (Socket.IO)
@@ -72,7 +74,7 @@ The platform supports both **High-Level System Design (HLD)** (distributed infra
 │  ├──────────────────────────────────────────────────┤  │
 │  │ Discrete Event Engine (Priority Queue / Sim Time) │  │
 │  ├──────────────────────────────────────────────────┤  │
-│  │ Bottleneck Analyzer (Deterministic Rules Engine)  │  │
+│  │ Architecture Analyzer (Deterministic Rule Engine) │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
@@ -85,7 +87,7 @@ The platform supports both **High-Level System Design (HLD)** (distributed infra
 | :--- | :--- |
 | **Frontend** | React 18, TypeScript, Vite, React Flow, Socket.io-client |
 | **Backend** | Python 3.11, Flask, Flask-SocketIO, Werkzeug, Pydantic |
-| **Simulation** | Discrete Event Simulation (`heapq`), Deterministic PRNG |
+| **Simulation** | Discrete Event Simulation (`heapq`), Seeded PRNG |
 | **Infrastructure** | Docker, Docker Compose, PostgreSQL 15, Redis 7 |
 | **Testing** | Pytest |
 
@@ -95,42 +97,70 @@ The platform supports both **High-Level System Design (HLD)** (distributed infra
 
 ### Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/)
-- Git
+- Alternatively: Node.js 18+ and Python 3.11+ for local development
 
-### 1. Clone & Run with Docker Compose
+### Configuration
+Copy the sample environment file:
 ```bash
-git clone https://github.com/ZainSyed1678/Sys-design_Sandbox.git
-cd Sys-design_Sandbox
+cp .env.example .env
+```
+Default ports:
+- Frontend: `3001`
+- Backend API: `5000`
 
-# Build and start all services
-docker-compose up --build -d
+### Quick Start with Docker
+```bash
+# Build and run all services
+make up
+
+# View logs
+docker compose logs -f
+
+# Shut down services
+make down
 ```
 
-### 2. Access the Application
-- **Frontend Canvas:** [http://localhost:3001](http://localhost:3001)
+### Access the Application
+- **Frontend UI:** [http://localhost:3001](http://localhost:3001)
 - **Backend API Health Check:** [http://localhost:5000/api/health](http://localhost:5000/api/health)
+
+---
+
+## Development Workflow (Makefile)
+
+A standard `Makefile` is provided for common development tasks:
+
+```bash
+make help          # Show available targets
+make up            # Start Docker Compose services
+make down          # Stop Docker Compose services
+make test          # Run backend unit test suite
+make lint          # Run backend code linter
+make dev-backend   # Run Flask backend locally
+make dev-frontend  # Run Vite frontend dev server locally
+```
 
 ---
 
 ## How to Use
 
 ### Simulating a Distributed Outage (HLD)
-1. Navigate to `http://localhost:3001` (default is **High Level System Design**).
+1. Open `http://localhost:3001` (defaults to **High Level System Design**).
 2. Click **+ Client**, **+ API Server**, and **+ Database** from the left toolbar.
 3. Connect `Client` ➔ `API Server` ➔ `Database` by dragging between handles.
-4. Click **Start Fast Magic** to initiate traffic generation.
-5. Click the **Database** node to select it, then click **Kill Box** in the top toolbar.
+4. Click **Start Simulation** to begin traffic flow.
+5. Click the **Database** node to select it, then click **Fail Node** in the top toolbar.
 6. Observe the cascading failure:
-   - The Database stops responding.
-   - The API Server's active capacity saturates.
-   - The API Server begins dropping requests (`Drop` count climbs).
-   - The **Grog Analysis** panel flags the outage and provides remediation advice.
-7. Click **Fix Box** to restore the Database and observe system recovery.
+   - The Database stops processing requests.
+   - The API Server's active concurrency capacity saturates.
+   - The API Server begins dropping requests (`Drop` counter climbs).
+   - The **Architecture Analysis** panel flags the failure and provides actionable remediation steps.
+7. Click **Recover Node** to restore the Database and observe system throughput recovery.
 
 ### Modeling Code Contracts (LLD)
-1. In the top right corner, switch to **🧩 Low Level System Design**.
+1. Click **🧩 Low Level System Design** in the top-right mode switcher.
 2. Click **+ Interface** to create `IUserService` and **+ Service** to create `UserService`.
-3. Connect `UserService` to `IUserService` (implements).
+3. Connect `UserService` to `IUserService` (`implements`).
 4. Click `UserService` to open the **Specifications Drawer** on the right.
 5. Add fields (e.g. `- userRepo: IUserRepository`) and methods (e.g. `+ findById(id: string): User`).
 6. Switch to the **Code Preview** tab to inspect the generated TypeScript or Python skeleton.
@@ -139,23 +169,42 @@ docker-compose up --build -d
 
 ## Running Tests
 
-Backend unit tests cover the discrete event simulation engine, component failure/recovery cycles, seed determinism, and bottleneck analysis rules:
+Run the test suite using `make test` or directly via `pytest`:
 
 ```bash
-# Inside WSL / Linux or Docker backend container:
 pytest backend/tests/
 ```
 
-Test suite includes:
+Current test suite covers:
 - `test_engine_basic_flow`: End-to-end event dispatching and throughput.
-- `test_api_drop_requests`: Capacity threshold and request drop behavior.
-- `test_component_failure_and_recovery`: Chaos failure and restoration mechanics.
+- `test_api_drop_requests`: Concurrency capacity thresholds and drop behavior.
+- `test_component_failure_and_recovery`: Chaos failure and recovery mechanics.
 - `test_deterministic_engine_seed`: Seed reproducibility verification.
-- `test_analyzer_detects_overloaded_component`: Bottleneck detection for saturated nodes.
-- `test_analyzer_detects_queue_overflow`: Backpressure and queue depth threshold detection.
+- `test_analyzer_detects_overloaded_component`: Saturated node detection.
+- `test_analyzer_detects_queue_overflow`: Queue depth and backpressure threshold alerts.
 - `test_analyzer_detects_dead_component`: Health tracking alerts.
 
 ---
 
+## Repository Settings & Manual Maintenance
+
+### GitHub Topics (Manual Configuration in GitHub Repo Settings)
+Please ensure the repository topics on GitHub are configured with the following tags:
+- `system-design`
+- `distributed-systems` (corrected from typo `destributed-systems`)
+- `discrete-event-simulation`
+- `react`
+- `typescript`
+- `python`
+- `flask`
+- `software-architecture`
+
+### Repository Renaming
+- Target repository name: `system-design-simulator` (currently `Sys-design_Sandbox`).
+- Please perform this rename manually via GitHub Repository Settings ➔ General ➔ Repository Name.
+
+---
+
 ## License
-MIT License. Created for interactive systems engineering and software architecture education.
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

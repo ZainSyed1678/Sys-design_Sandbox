@@ -6,7 +6,7 @@ architecture_bp = Blueprint('architecture', __name__)
 def validate_architecture():
     data = request.json
     if not data:
-        return jsonify({"status": "error", "message": "No JSON rock given"}), 400
+        return jsonify({"status": "error", "message": "No graph data provided"}), 400
     
     nodes = data.get('nodes', [])
     edges = data.get('edges', [])
@@ -21,6 +21,6 @@ def validate_architecture():
             has_client = True
             
     if not has_client:
-        return jsonify({"status": "error", "message": "Need at least one Client box to make requests!"}), 400
+        return jsonify({"status": "error", "message": "At least one Client node is required to generate traffic."}), 400
         
-    return jsonify({"status": "ok", "message": "Architecture looks good to Grog."})
+    return jsonify({"status": "ok", "message": "Architecture graph is valid."})
