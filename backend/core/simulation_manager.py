@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from simulation.engine import SimulationEngine
 from simulation.components import Client, LoadBalancer, APIServer, Database, Cache, MessageQueue, Worker
 from simulation.distributions import Distribution, DistributionType
+from simulation.resilience import CircuitBreaker, TokenBucket, RetryPolicy
 from simulation.events import Event, EventType
 from extensions import socketio
 from core.analyzer import analyzer
@@ -52,7 +53,37 @@ class SimulationInstance:
                     target_id = targets[0] if targets else "none"
                     rate = float(data.get("rate_per_sec", 10))
                     arr_process = data.get("arrival_process", "poisson")
-                    comp = Client(nid, target_id, rate_per_sec=rate, arrival_process=arr_process)
+                    timeout = float(data["timeout"]) if "timeout" in data else None
+                    retry_pol = None
+                    if "retries" in data:
+                        retry_pol = RetryPolicy(
+                            max_retries=int(data.get("retries", 3)),
+                            base_delay=float(data.get("retry_delay", 0.1)),
+                            backoff_type=data.get("backoff_type", "exponential"),
+                            retry_budget_ratio=float(data["retry_budget"]) if "retry_budget" in data else None,
+                        )
+                    cb = None
+                    if data.get("circuit_breaker"):
+                        cb = CircuitBreaker(
+                            failure_threshold=int(data.get("cb_failure_threshold", 5)),
+                            recovery_timeout=float(data.get("cb_recovery_timeout", 5.0)),
+                        )
+                    tb = None
+                    if data.get("rate_limit"):
+                        tb = TokenBucket(
+                            capacity=float(data.get("rate_limit_capacity", 100)),
+                            refill_rate=float(data.get("rate_limit_refill", 50)),
+                        )
+                    comp = Client(
+                        nid,
+                        target_id,
+                        rate_per_sec=rate,
+                        arrival_process=arr_process,
+                        timeout=timeout,
+                        retry_policy=retry_pol,
+                        circuit_breaker=cb,
+                        rate_limiter=tb,
+                    )
                     self.engine.register_component(comp)
                     self.engine.schedule(Event(time=0.0, type=EventType.REQUEST_ARRIVED, target_id=nid))
 
@@ -68,6 +99,19 @@ class SimulationInstance:
                     max_queue = data.get("max_queue_depth", 50)
                     dist_type = data.get("distribution", DistributionType.CONSTANT.value)
                     service_dist = Distribution(dist_type, mean=latency)
+                    timeout = float(data["timeout"]) if "timeout" in data else None
+                    cb = None
+                    if data.get("circuit_breaker"):
+                        cb = CircuitBreaker(
+                            failure_threshold=int(data.get("cb_failure_threshold", 5)),
+                            recovery_timeout=float(data.get("cb_recovery_timeout", 5.0)),
+                        )
+                    tb = None
+                    if data.get("rate_limit"):
+                        tb = TokenBucket(
+                            capacity=float(data.get("rate_limit_capacity", 100)),
+                            refill_rate=float(data.get("rate_limit_refill", 50)),
+                        )
                     comp = APIServer(
                         nid,
                         concurrency=concurrency,
@@ -75,6 +119,9 @@ class SimulationInstance:
                         service_dist=service_dist,
                         max_queue_depth=max_queue,
                         db_id=db_id,
+                        timeout=timeout,
+                        circuit_breaker=cb,
+                        rate_limiter=tb,
                     )
                     self.engine.register_component(comp)
 
@@ -84,12 +131,19 @@ class SimulationInstance:
                     max_queue = data.get("max_queue_depth", 50)
                     dist_type = data.get("distribution", DistributionType.CONSTANT.value)
                     service_dist = Distribution(dist_type, mean=latency)
+                    tb = None
+                    if data.get("rate_limit"):
+                        tb = TokenBucket(
+                            capacity=float(data.get("rate_limit_capacity", 100)),
+                            refill_rate=float(data.get("rate_limit_refill", 50)),
+                        )
                     comp = Database(
                         nid,
                         concurrency=concurrency,
                         latency=latency,
                         service_dist=service_dist,
                         max_queue_depth=max_queue,
+                        rate_limiter=tb,
                     )
                     self.engine.register_component(comp)
 

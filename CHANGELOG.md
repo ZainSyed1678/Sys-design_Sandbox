@@ -2,6 +2,29 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 3 — Failure Modeling (Retries, Timeouts, Circuit Breakers)] - 2026-10-21
+
+### Completed
+- **Resilience Engine & Policies (`backend/simulation/resilience.py`):**
+  - **Circuit Breaker:** Implemented three-state state machine (`CLOSED`, `OPEN`, `HALF_OPEN`) with configurable failure threshold, recovery timeout, half-open probe concurrency, and success threshold.
+  - **Token Bucket Rate Limiting / Load Shedding:** Continuous token accumulation based on elapsed virtual time, burst capacity, and refill rate.
+  - **Retry Policy:** Configurable max attempts, fixed/exponential backoff, seeded uniform full jitter via engine PRNG, and optional retry budget ratio.
+- **Richer Failure Modes:**
+  - **Partial Degradation:** Dynamic latency multiplier (`COMPONENT_DEGRADED`, `COMPONENT_RESTORED`) scaling component execution durations.
+  - **Intermittent Failures:** Configurable failure probability $p \in [0, 1]$ evaluated via seeded PRNG.
+  - **Network Partitions:** Selective bidirectional edge partitions (`NETWORK_PARTITION`, `NETWORK_REPAIR`) in `SimulationEngine`, severing communication between specific node pairs while maintaining broader network reachability.
+- **Component Resilience Integration:**
+  - **`Client`:** Configurable request timeouts (`REQUEST_TIMEOUT`), retry scheduling (`RETRY_ATTEMPT`), retry budget enforcement, and optional circuit breaker protection.
+  - **`APIServer`:** Circuit breaker protection for downstream dependencies (fast-failing with zero delay when OPEN), downstream timeouts, and load shedding via token buckets.
+  - **`Database` & Workers:** Support for degradation multipliers, token bucket admission, and network partition checks.
+- **Comprehensive Resilience Test Suite (`backend/tests/test_resilience.py`):**
+  - Verified retry storm load amplification during database outage (amplification factor $> 1.5\times$).
+  - Verified circuit breaker tripping OPEN, fast-failing traffic, preventing queue saturation, and recovering to CLOSED.
+  - Verified retry budget strictly capping retry attempts during sustained outages.
+  - Verified timeouts without retries dropping degraded requests with amplification factor strictly equal to 1.0.
+  - Verified token bucket load shedding and burst rate limits.
+  - Verified component latency degradation and selective network partition isolation.
+
 ## [Phase 2 — Simulation Correctness and Validation] - 2026-10-21
 
 ### Completed

@@ -2,6 +2,7 @@ import math
 from typing import List, Optional, Dict, Any
 from .events import Event, EventType
 from .distributions import Distribution, DistributionType
+from .resilience import CircuitBreaker, TokenBucket, RetryPolicy
 from .engine import calculate_percentiles
 
 class BaseComponent:
@@ -12,6 +13,11 @@ class BaseComponent:
         self.dropped = 0
         self.completed = 0
         self.failed = 0
+
+        # Phase 3 Failure Modeling
+        self.latency_multiplier: float = 1.0
+        self.failure_probability: float = 0.0
+        self.rate_limiter: Optional[TokenBucket] = None
 
         # Area integrals for exact queueing theory statistics
         self.area_busy: float = 0.0
@@ -39,9 +45,7 @@ class BaseComponent:
             self.last_area_time = curr
 
     def get_utilization(self) -> float:
-        """
-        Server utilization rho = time-average busy servers / concurrency.
-        """
+        """Server utilization rho = time-average busy servers / concurrency."""
         self._update_areas()
         if not self.engine or self.engine.time <= 0:
             return 0.0
@@ -79,27 +83,61 @@ class BaseComponent:
 
     def handle_event(self, event: Event) -> bool:
         self._update_areas()
+
+        # Handle failure injection events
         if event.type == EventType.COMPONENT_FAILED:
             self.is_healthy = False
             return False
         elif event.type == EventType.COMPONENT_RECOVERED:
             self.is_healthy = True
+            self.latency_multiplier = 1.0
+            return False
+        elif event.type == EventType.COMPONENT_DEGRADED:
+            self.latency_multiplier = float(event.data.get("multiplier", 3.0))
+            return False
+        elif event.type == EventType.COMPONENT_RESTORED:
+            self.latency_multiplier = 1.0
             return False
 
+        # Check unhealthy status
         if not self.is_healthy and event.type == EventType.REQUEST_ARRIVED:
             self.dropped += 1
             if self.engine:
                 self.engine.record_request_dropped(event.data, self.id, "component_unhealthy")
             return False
 
+        # Check network partition
+        source_id = event.data.get("source")
+        if source_id and self.engine and self.engine.is_partitioned(source_id, self.id):
+            self.dropped += 1
+            self.engine.record_request_dropped(event.data, self.id, "network_partition")
+            return False
+
+        # Check intermittent failure
+        if event.type == EventType.REQUEST_ARRIVED and self.failure_probability > 0:
+            if self.engine and self.engine.rng.random() < self.failure_probability:
+                self.dropped += 1
+                self.failed += 1
+                self.engine.record_request_dropped(event.data, self.id, "intermittent_failure")
+                return False
+
+        # Check load shedding / rate limiter (token bucket)
+        if event.type == EventType.REQUEST_ARRIVED and self.rate_limiter:
+            if self.engine and not self.rate_limiter.allow_request(self.engine.time):
+                self.dropped += 1
+                self.engine.record_request_dropped(event.data, self.id, "rate_limited")
+                return False
+
         return True
 
     def get_state(self) -> Dict[str, Any]:
         self._update_areas()
         lat_pct = calculate_percentiles(self.completed_latencies)
-        return {
+        state = {
             "id": self.id,
             "healthy": self.is_healthy,
+            "degraded": self.latency_multiplier > 1.0,
+            "latency_multiplier": self.latency_multiplier,
             "dropped": self.dropped,
             "completed": self.completed,
             "failed": self.failed,
@@ -113,6 +151,9 @@ class BaseComponent:
             "mean_queue_length": round(self.get_mean_queue_length(), 4),
             "mean_system_occupancy": round(self.get_mean_system_occupancy(), 4),
         }
+        if self.rate_limiter:
+            state["rate_limiter"] = self.rate_limiter.get_state()
+        return state
 
 
 class Client(BaseComponent):
@@ -123,6 +164,10 @@ class Client(BaseComponent):
         rate_per_sec: float = 10.0,
         arrival_dist: Optional[Distribution] = None,
         arrival_process: Optional[str] = None,
+        timeout: Optional[float] = None,
+        retry_policy: Optional[RetryPolicy] = None,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        rate_limiter: Optional[TokenBucket] = None,
     ):
         super().__init__(id)
         self.target_id = target_id
@@ -135,7 +180,18 @@ class Client(BaseComponent):
             self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
         else:
             self.arrival_dist = Distribution(DistributionType.CONSTANT, mean=1.0 / self.rate_per_sec)
-        self.sent = 0
+
+        # Resilience policies
+        self.timeout = float(timeout) if timeout is not None else None
+        self.retry_policy = retry_policy
+        self.circuit_breaker = circuit_breaker
+        self.rate_limiter = rate_limiter
+
+        self.sent: int = 0
+        self.total_attempts: int = 0
+        self.retry_count: int = 0
+        self.timeout_count: int = 0
+        self.pending_requests: Dict[str, Dict[str, Any]] = {}
 
     def handle_event(self, event: Event):
         if not super().handle_event(event):
@@ -146,28 +202,25 @@ class Client(BaseComponent):
             self.arrival_dist.mean = 1.0 / self.rate_per_sec
 
         elif event.type == EventType.REQUEST_ARRIVED:
-            # Deterministic request ID generation
+            # Client creates and dispatches a new request
             req_id = self.engine.next_request_id(prefix=f"req_{self.id}") if self.engine else f"req_{self.id}_{self.sent}"
             self.sent += 1
+            if self.retry_policy:
+                self.retry_policy.record_initial()
 
             req_data = {
                 "request_id": req_id,
                 "source": self.id,
                 "client_id": self.id,
                 "created_at": self.engine.time if self.engine else 0.0,
+                "attempt": 1,
                 "hops": [],
             }
 
-            # Forward request to downstream target
-            if self.engine:
-                self.engine.schedule(Event(
-                    time=self.engine.time,
-                    type=EventType.REQUEST_ARRIVED,
-                    target_id=self.target_id,
-                    data=req_data,
-                ))
+            self._dispatch_request(req_data, attempt=1)
 
-                # Schedule next arrival driven by PRNG distribution
+            # Schedule next client request
+            if self.engine:
                 interval = self.arrival_dist.sample(self.engine.rng)
                 self.engine.schedule(Event(
                     time=self.engine.time + interval,
@@ -175,11 +228,111 @@ class Client(BaseComponent):
                     target_id=self.id,
                 ))
 
+        elif event.type == EventType.REQUEST_COMPLETED:
+            req_id = event.data.get("request_id")
+            if req_id and req_id in self.pending_requests:
+                del self.pending_requests[req_id]
+            self.completed += 1
+            if self.circuit_breaker and self.engine:
+                self.circuit_breaker.record_success(self.engine.time)
+            if self.engine:
+                self.engine.record_request_completion(event.data)
+
+        elif event.type == EventType.REQUEST_TIMEOUT:
+            req_id = event.data.get("request_id")
+            timeout_attempt = event.data.get("attempt", 1)
+            if req_id in self.pending_requests:
+                req_info = self.pending_requests[req_id]
+                if req_info["attempt"] == timeout_attempt:
+                    self.timeout_count += 1
+                    if self.circuit_breaker and self.engine:
+                        self.circuit_breaker.record_failure(self.engine.time)
+
+                    # Check retry policy
+                    next_attempt = timeout_attempt + 1
+                    if self.retry_policy and self.retry_policy.can_retry(next_attempt):
+                        self.retry_policy.record_retry()
+                        self.retry_count += 1
+                        delay = self.retry_policy.calculate_delay(next_attempt, self.engine.rng)
+                        self.engine.schedule(Event(
+                            time=self.engine.time + delay,
+                            type=EventType.RETRY_ATTEMPT,
+                            target_id=self.id,
+                            data={"request_id": req_id, "attempt": next_attempt},
+                        ))
+                    else:
+                        # Retries exhausted
+                        del self.pending_requests[req_id]
+                        self.failed += 1
+                        if self.engine:
+                            self.engine.record_request_dropped(req_info["data"], self.id, "timeout_exhausted")
+
+        elif event.type == EventType.RETRY_ATTEMPT:
+            req_id = event.data.get("request_id")
+            attempt = event.data.get("attempt", 2)
+            if req_id in self.pending_requests:
+                req_data = self.pending_requests[req_id]["data"]
+                req_data["attempt"] = attempt
+                self._dispatch_request(req_data, attempt=attempt)
+
+    def _dispatch_request(self, req_data: Dict[str, Any], attempt: int):
+        req_id = req_data["request_id"]
+
+        # Check circuit breaker before transmission
+        if self.circuit_breaker and self.engine:
+            if not self.circuit_breaker.allow_request(self.engine.time):
+                self.dropped += 1
+                self.engine.record_request_dropped(req_data, self.id, "circuit_breaker_open")
+                if req_id in self.pending_requests:
+                    del self.pending_requests[req_id]
+                return
+
+        # Check network partition
+        if self.engine and self.engine.is_partitioned(self.id, self.target_id):
+            self.dropped += 1
+            self.engine.record_request_dropped(req_data, self.id, "network_partition")
+            if self.circuit_breaker:
+                self.circuit_breaker.record_failure(self.engine.time)
+            if req_id in self.pending_requests:
+                del self.pending_requests[req_id]
+            return
+
+        self.total_attempts += 1
+        self.pending_requests[req_id] = {
+            "data": req_data,
+            "attempt": attempt,
+            "dispatched_at": self.engine.time if self.engine else 0.0,
+        }
+
+        if self.engine:
+            self.engine.schedule(Event(
+                time=self.engine.time,
+                type=EventType.REQUEST_ARRIVED,
+                target_id=self.target_id,
+                data=req_data,
+            ))
+
+            # Schedule timeout if configured
+            if self.timeout is not None:
+                self.engine.schedule(Event(
+                    time=self.engine.time + self.timeout,
+                    type=EventType.REQUEST_TIMEOUT,
+                    target_id=self.id,
+                    data={"request_id": req_id, "attempt": attempt},
+                ))
+
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
         state["sent"] = self.sent
+        state["total_attempts"] = self.total_attempts
+        state["retry_count"] = self.retry_count
+        state["timeout_count"] = self.timeout_count
         state["rate_per_sec"] = self.rate_per_sec
         state["arrival_process"] = self.arrival_dist.dist_type.value
+        if self.circuit_breaker:
+            state["circuit_breaker"] = self.circuit_breaker.get_state()
+        if self.retry_policy:
+            state["retry_policy"] = self.retry_policy.get_state()
         return state
 
 
@@ -203,7 +356,14 @@ class LoadBalancer(BaseComponent):
             target = self.backend_ids[self.index]
             self.index = (self.index + 1) % len(self.backend_ids)
 
+            # Check network partition between LB and backend
+            if self.engine and self.engine.is_partitioned(self.id, target):
+                self.dropped += 1
+                self.engine.record_request_dropped(event.data, self.id, "network_partition")
+                return
+
             if self.engine:
+                event.data["source"] = self.id
                 self.engine.schedule(Event(
                     time=self.engine.time,
                     type=EventType.REQUEST_ARRIVED,
@@ -222,19 +382,29 @@ class APIServer(BaseComponent):
         service_dist: Optional[Distribution] = None,
         max_queue_depth: Optional[int] = 0,
         db_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        rate_limiter: Optional[TokenBucket] = None,
     ):
         super().__init__(id)
         self.concurrency = concurrency if concurrency is not None else (capacity if capacity is not None else 10)
-        self.capacity = self.concurrency  # Backwards compatibility
+        self.capacity = self.concurrency
         self.latency = float(latency)
         if service_dist is not None:
             self.service_dist = service_dist
         else:
             self.service_dist = Distribution(DistributionType.CONSTANT, mean=self.latency)
-        self.max_queue_depth = max_queue_depth  # None = unbounded, 0 = loss system, >0 = bounded queue
+        self.max_queue_depth = max_queue_depth
         self.db_id = db_id
+
+        # Phase 3 Resilience
+        self.timeout = float(timeout) if timeout is not None else None
+        self.circuit_breaker = circuit_breaker
+        self.rate_limiter = rate_limiter
+
         self.active_requests: int = 0
         self.waiting_queue: List[Dict[str, Any]] = []
+        self.pending_downstream: Dict[str, Dict[str, Any]] = {}
 
     def handle_event(self, event: Event):
         if not super().handle_event(event):
@@ -244,12 +414,10 @@ class APIServer(BaseComponent):
             req_data = event.data
 
             if self.active_requests < self.concurrency:
-                # Immediate service
                 self.active_requests += 1
                 self.queue_wait_times.append(0.0)
                 self._start_service(req_data, queue_wait=0.0)
             else:
-                # Server busy: check queue capacity
                 if self.max_queue_depth is None or len(self.waiting_queue) < self.max_queue_depth:
                     self.waiting_queue.append({
                         "data": req_data,
@@ -262,10 +430,14 @@ class APIServer(BaseComponent):
 
         elif event.type == EventType.REQUEST_COMPLETED:
             req_data = event.data
+            req_id = req_data.get("request_id")
 
             # Check if this completion is returning from a downstream DB
-            if req_data.get("_awaiting_db_return", False):
-                req_data["_awaiting_db_return"] = False
+            if req_id in self.pending_downstream:
+                del self.pending_downstream[req_id]
+                if self.circuit_breaker and self.engine:
+                    self.circuit_breaker.record_success(self.engine.time)
+
                 rem_dur = req_data.pop("_remaining_service", 0.0)
                 if rem_dur > 0:
                     self.engine.schedule(Event(
@@ -276,32 +448,58 @@ class APIServer(BaseComponent):
                     ))
                     return
 
-            # Request finished processing at this server
+            self._complete_request(req_data)
+
+        elif event.type == EventType.REQUEST_TIMEOUT:
+            req_id = event.data.get("request_id")
+            if req_id in self.pending_downstream:
+                req_info = self.pending_downstream.pop(req_id)
+                if self.circuit_breaker and self.engine:
+                    self.circuit_breaker.record_failure(self.engine.time)
+                self.failed += 1
+                if self.engine:
+                    self.engine.record_request_dropped(req_info["data"], self.id, "downstream_timeout")
+                # Free worker slot and dequeue next request
+                self._free_worker_and_dequeue()
+
+    def _complete_request(self, req_data: Dict[str, Any]):
+        self.active_requests = max(0, self.active_requests - 1)
+        self.completed += 1
+
+        hop = req_data.get("_current_hop", {})
+        if hop:
+            hop_dur = self.engine.time - hop.get("arrived_at", self.engine.time)
+            self.completed_latencies.append(hop_dur)
+            req_data.setdefault("hops", []).append(hop)
+            req_data.pop("_current_hop", None)
+
+        # Notify caller (Client) if present
+        client_id = req_data.get("client_id")
+        if client_id and self.engine and client_id in self.engine.components:
+            self.engine.schedule(Event(
+                time=self.engine.time,
+                type=EventType.REQUEST_COMPLETED,
+                target_id=client_id,
+                data=req_data,
+            ))
+        elif self.engine:
+            self.engine.record_request_completion(req_data)
+
+        self._free_worker_and_dequeue(already_freed=True)
+
+    def _free_worker_and_dequeue(self, already_freed: bool = False):
+        if not already_freed:
             self.active_requests = max(0, self.active_requests - 1)
-            self.completed += 1
 
-            # Complete hop tracking
-            hop = req_data.get("_current_hop", {})
-            if hop:
-                hop_dur = self.engine.time - hop.get("arrived_at", self.engine.time)
-                self.completed_latencies.append(hop_dur)
-                req_data.setdefault("hops", []).append(hop)
-                req_data.pop("_current_hop", None)
-
-            # Record system-wide completion if terminal
-            if self.engine:
-                self.engine.record_request_completion(req_data)
-
-            # Dequeue next waiting request if queue is non-empty
-            if self.waiting_queue and self.active_requests < self.concurrency:
-                next_item = self.waiting_queue.pop(0)
-                self.active_requests += 1
-                q_wait = max(0.0, self.engine.time - next_item["queued_at"])
-                self.queue_wait_times.append(q_wait)
-                self._start_service(next_item["data"], queue_wait=q_wait)
+        if self.waiting_queue and self.active_requests < self.concurrency:
+            next_item = self.waiting_queue.pop(0)
+            self.active_requests += 1
+            q_wait = max(0.0, self.engine.time - next_item["queued_at"])
+            self.queue_wait_times.append(q_wait)
+            self._start_service(next_item["data"], queue_wait=q_wait)
 
     def _start_service(self, req_data: Dict[str, Any], queue_wait: float):
-        dur = self.service_dist.sample(self.engine.rng) if self.engine else self.latency
+        dur = (self.service_dist.sample(self.engine.rng) if self.engine else self.latency) * self.latency_multiplier
         self.service_times.append(dur)
 
         req_data["_current_hop"] = {
@@ -313,16 +511,46 @@ class APIServer(BaseComponent):
         }
 
         if self.db_id and self.engine:
-            # Multi-tier call: half latency before DB, downstream call, half latency on return
-            req_data["_awaiting_db_return"] = True
+            # Check Circuit Breaker before calling DB
+            if self.circuit_breaker and not self.circuit_breaker.allow_request(self.engine.time):
+                self.dropped += 1
+                self.engine.record_request_dropped(req_data, self.id, "circuit_breaker_open")
+                self._free_worker_and_dequeue()
+                return
+
+            # Check network partition to DB
+            if self.engine.is_partitioned(self.id, self.db_id):
+                self.dropped += 1
+                self.engine.record_request_dropped(req_data, self.id, "network_partition")
+                if self.circuit_breaker:
+                    self.circuit_breaker.record_failure(self.engine.time)
+                self._free_worker_and_dequeue()
+                return
+
+            req_id = req_data["request_id"]
+            self.pending_downstream[req_id] = {
+                "data": req_data,
+                "dispatched_at": self.engine.time,
+            }
             req_data["_remaining_service"] = dur / 2.0
             req_data["api_id"] = self.id
+            req_data["source"] = self.id
+
             self.engine.schedule(Event(
                 time=self.engine.time + (dur / 2.0),
                 type=EventType.REQUEST_ARRIVED,
                 target_id=self.db_id,
                 data=req_data,
             ))
+
+            # Schedule downstream timeout if configured
+            if self.timeout is not None:
+                self.engine.schedule(Event(
+                    time=self.engine.time + (dur / 2.0) + self.timeout,
+                    type=EventType.REQUEST_TIMEOUT,
+                    target_id=self.id,
+                    data={"request_id": req_id},
+                ))
         elif self.engine:
             self.engine.schedule(Event(
                 time=self.engine.time + dur,
@@ -344,6 +572,8 @@ class APIServer(BaseComponent):
         state["queue_wait_p50"] = q_pct["p50"]
         state["queue_wait_p95"] = q_pct["p95"]
         state["queue_wait_mean"] = q_pct["mean"]
+        if self.circuit_breaker:
+            state["circuit_breaker"] = self.circuit_breaker.get_state()
         return state
 
 
@@ -356,16 +586,19 @@ class Database(BaseComponent):
         latency: float = 0.2,
         service_dist: Optional[Distribution] = None,
         max_queue_depth: Optional[int] = 0,
+        rate_limiter: Optional[TokenBucket] = None,
     ):
         super().__init__(id)
         self.concurrency = concurrency if concurrency is not None else (capacity if capacity is not None else 5)
-        self.capacity = self.concurrency  # Backwards compatibility
+        self.capacity = self.concurrency
         self.latency = float(latency)
         if service_dist is not None:
             self.service_dist = service_dist
         else:
             self.service_dist = Distribution(DistributionType.CONSTANT, mean=self.latency)
         self.max_queue_depth = max_queue_depth
+        self.rate_limiter = rate_limiter
+
         self.active_requests: int = 0
         self.waiting_queue: List[Dict[str, Any]] = []
 
@@ -396,7 +629,6 @@ class Database(BaseComponent):
             self.active_requests = max(0, self.active_requests - 1)
             self.completed += 1
 
-            # Complete DB hop
             hop = req_data.get("_db_hop", {})
             if hop:
                 hop_dur = self.engine.time - hop.get("arrived_at", self.engine.time)
@@ -404,9 +636,9 @@ class Database(BaseComponent):
                 req_data.setdefault("hops", []).append(hop)
                 req_data.pop("_db_hop", None)
 
-            # Return response to upstream caller (APIServer) if designated
             api_id = req_data.get("api_id")
             if api_id and self.engine:
+                req_data["source"] = self.id
                 self.engine.schedule(Event(
                     time=self.engine.time,
                     type=EventType.REQUEST_COMPLETED,
@@ -416,7 +648,6 @@ class Database(BaseComponent):
             elif self.engine:
                 self.engine.record_request_completion(req_data)
 
-            # Dequeue next waiting request
             if self.waiting_queue and self.active_requests < self.concurrency:
                 next_item = self.waiting_queue.pop(0)
                 self.active_requests += 1
@@ -425,7 +656,7 @@ class Database(BaseComponent):
                 self._start_service(next_item["data"], queue_wait=q_wait)
 
     def _start_service(self, req_data: Dict[str, Any], queue_wait: float):
-        dur = self.service_dist.sample(self.engine.rng) if self.engine else self.latency
+        dur = (self.service_dist.sample(self.engine.rng) if self.engine else self.latency) * self.latency_multiplier
         self.service_times.append(dur)
 
         req_data["_db_hop"] = {
@@ -474,15 +705,16 @@ class Cache(BaseComponent):
             return
 
         if event.type == EventType.REQUEST_ARRIVED:
-            # Use seeded PRNG from engine
             rng_roll = self.engine.rng.random() if self.engine else 0.5
+            eff_latency = self.latency * self.latency_multiplier
             if rng_roll < self.hit_rate:
                 self.hits += 1
                 self.completed += 1
                 if self.engine:
                     target = event.data.get("api_id") or self.id
+                    event.data["source"] = self.id
                     self.engine.schedule(Event(
-                        time=self.engine.time + self.latency,
+                        time=self.engine.time + eff_latency,
                         type=EventType.REQUEST_COMPLETED,
                         target_id=target,
                         data=event.data,
@@ -490,8 +722,9 @@ class Cache(BaseComponent):
             else:
                 self.misses += 1
                 if self.db_id and self.engine:
+                    event.data["source"] = self.id
                     self.engine.schedule(Event(
-                        time=self.engine.time + self.latency,
+                        time=self.engine.time + eff_latency,
                         type=EventType.REQUEST_ARRIVED,
                         target_id=self.db_id,
                         data=event.data,
@@ -505,6 +738,7 @@ class Cache(BaseComponent):
             self.completed += 1
             if self.engine:
                 target = event.data.get("api_id") or self.id
+                event.data["source"] = self.id
                 self.engine.schedule(Event(
                     time=self.engine.time,
                     type=EventType.REQUEST_COMPLETED,
@@ -556,15 +790,17 @@ class MessageQueue(BaseComponent):
         for wid in self.workers:
             w = self.engine.components.get(wid)
             if w and getattr(w, "active_requests", 0) < getattr(w, "concurrency", getattr(w, "capacity", 1)):
-                data = self.queue.pop(0)
-                self.engine.schedule(Event(
-                    time=self.engine.time,
-                    type=EventType.REQUEST_ARRIVED,
-                    target_id=wid,
-                    data=data,
-                ))
-                if not self.queue:
-                    break
+                if not self.engine.is_partitioned(self.id, wid):
+                    data = self.queue.pop(0)
+                    data["source"] = self.id
+                    self.engine.schedule(Event(
+                        time=self.engine.time,
+                        type=EventType.REQUEST_ARRIVED,
+                        target_id=wid,
+                        data=data,
+                    ))
+                    if not self.queue:
+                        break
 
     def get_state(self) -> Dict[str, Any]:
         state = super().get_state()
@@ -586,7 +822,7 @@ class Worker(BaseComponent):
         super().__init__(id)
         self.queue_id = queue_id
         self.concurrency = concurrency if concurrency is not None else (capacity if capacity is not None else 5)
-        self.capacity = self.concurrency  # Backwards compatibility
+        self.capacity = self.concurrency
         self.latency = float(latency)
         if service_dist is not None:
             self.service_dist = service_dist
@@ -600,7 +836,7 @@ class Worker(BaseComponent):
 
         if event.type == EventType.REQUEST_ARRIVED:
             self.active_requests += 1
-            dur = self.service_dist.sample(self.engine.rng) if self.engine else self.latency
+            dur = (self.service_dist.sample(self.engine.rng) if self.engine else self.latency) * self.latency_multiplier
             self.service_times.append(dur)
             if self.engine:
                 self.engine.schedule(Event(
@@ -615,6 +851,7 @@ class Worker(BaseComponent):
             self.completed += 1
             if self.engine:
                 self.engine.record_request_completion(event.data)
+                event.data["source"] = self.id
                 self.engine.schedule(Event(
                     time=self.engine.time,
                     type=EventType.REQUEST_COMPLETED,

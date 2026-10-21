@@ -2,7 +2,7 @@ import heapq
 import math
 import random
 from typing import Dict, List, Any, Optional
-from .events import Event
+from .events import Event, EventType
 
 def calculate_percentiles(values: List[float]) -> Dict[str, float]:
     """
@@ -67,6 +67,9 @@ class SimulationEngine:
         self.completed_requests: List[Dict[str, Any]] = []
         self.dropped_requests: List[Dict[str, Any]] = []
         self._metrics_dirty: bool = False
+
+        # Failure modeling & Network partitions (Phase 3)
+        self.network_partitions: set = set()
 
         # Core metrics dictionary (preserves backwards compatibility)
         self._metrics: Dict[str, Any] = {
@@ -195,12 +198,40 @@ class SimulationEngine:
 
         self._metrics_dirty = False
 
+    def add_partition(self, u: str, v: str):
+        """Sever bidirectional network connectivity between node u and node v."""
+        self.network_partitions.add((u, v))
+        self.network_partitions.add((v, u))
+
+    def remove_partition(self, u: str, v: str):
+        """Restore network connectivity between node u and node v."""
+        self.network_partitions.discard((u, v))
+        self.network_partitions.discard((v, u))
+
+    def is_partitioned(self, u: str, v: str) -> bool:
+        """Check if network transmission between u and v is blocked."""
+        return (u, v) in self.network_partitions
+
     def run(self, until: float):
         """Execute scheduled discrete events up to virtual time 'until'."""
         while self.events and self.events[0].time <= until:
             event = heapq.heappop(self.events)
             self._advance_time_windows(event.time)
             self.time = event.time
+
+            # Handle global network partition events
+            if event.type == EventType.NETWORK_PARTITION:
+                src = event.data.get("source")
+                tgt = event.data.get("target")
+                if src and tgt:
+                    self.add_partition(src, tgt)
+                continue
+            elif event.type == EventType.NETWORK_REPAIR:
+                src = event.data.get("source")
+                tgt = event.data.get("target")
+                if src and tgt:
+                    self.remove_partition(src, tgt)
+                continue
 
             target = self.components.get(event.target_id)
             if target:
