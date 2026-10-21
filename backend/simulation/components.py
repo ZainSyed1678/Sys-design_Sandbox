@@ -32,6 +32,7 @@ class BaseComponent:
         self.completed_latencies: List[float] = []
         self.queue_wait_times: List[float] = []
         self.service_times: List[float] = []
+        self.history: List[Dict[str, Any]] = []
 
     def _update_areas(self):
         """Update continuous area integrals up to the current simulation time."""
@@ -156,6 +157,24 @@ class BaseComponent:
         }
         if self.rate_limiter:
             state["rate_limiter"] = self.rate_limiter.get_state()
+
+        curr_t = round(self.engine.time, 2) if self.engine else 0.0
+        q_len = len(getattr(self, "waiting_queue", [])) if hasattr(self, "waiting_queue") else (len(getattr(self, "queue", [])) if hasattr(self, "queue") else 0)
+        snapshot = {
+            "time": curr_t,
+            "utilization": state["utilization"],
+            "throughput": state["throughput"],
+            "drop_rate": state["drop_rate"],
+            "latency_p50": state["latency_p50"],
+            "latency_p95": state["latency_p95"],
+            "latency_p99": state["latency_p99"],
+            "queue_depth": q_len,
+        }
+        if not self.history or abs(self.history[-1]["time"] - curr_t) >= 0.5:
+            self.history.append(snapshot)
+            if len(self.history) > 30:
+                self.history.pop(0)
+        state["history"] = list(self.history)
         return state
 
 

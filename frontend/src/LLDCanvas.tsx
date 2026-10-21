@@ -16,6 +16,8 @@ import 'reactflow/dist/style.css';
 import { LLDNode, LLDNodeData } from './nodes/LLDNode';
 import { LLDSpecificationsPanel } from './components/LLDSpecificationsPanel';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const nodeTypes = {
   lld: LLDNode,
 };
@@ -95,6 +97,15 @@ export function LLDCanvas() {
   const [nodes, setNodes] = useState<Node<LLDNodeData>[]>(initialLLDNodes);
   const [edges, setEdges] = useState<Edge[]>(initialLLDEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [validationModal, setValidationModal] = useState<{
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    class_count: number;
+    relationship_count: number;
+  } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds) as Node<LLDNodeData>[]),
@@ -158,6 +169,46 @@ export function LLDCanvas() {
     setSelectedNodeId(null);
   };
 
+  const validateArchitecture = async () => {
+    setIsValidating(true);
+    try {
+      const res = await fetch(`${API_URL}/api/lld/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, edges }),
+      });
+      const data = await res.json();
+      setValidationModal(data);
+    } catch (e: any) {
+      alert('Validation Error: Unable to reach backend validation service');
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const exportZipArchive = async () => {
+    setIsExporting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/lld/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, edges }),
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'lld_architecture_skeletons.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert('Export Error: Unable to generate ZIP archive');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
   }, [nodes, selectedNodeId]);
@@ -201,8 +252,22 @@ export function LLDCanvas() {
           + Design Pattern <span className="badge">{counts['pattern'] || 0}</span>
         </button>
 
-        <div style={{ marginTop: 'auto', background: '#1e1e24', padding: '10px', borderRadius: '6px', fontSize: '0.78rem', color: '#aaa', border: '1px solid #3a3a48' }}>
-          💡 <strong>Tip:</strong> Click any component on the canvas to configure specifications and view generated code.
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <button
+            className="sidebar-btn primary-btn"
+            onClick={validateArchitecture}
+            disabled={isValidating}
+          >
+            {isValidating ? 'Validating...' : '✓ Validate UML'}
+          </button>
+          <button
+            className="sidebar-btn"
+            style={{ background: '#1976d2', color: '#fff' }}
+            onClick={exportZipArchive}
+            disabled={isExporting}
+          >
+            {isExporting ? 'Packaging...' : '📦 Export ZIP'}
+          </button>
         </div>
       </div>
 
@@ -238,6 +303,55 @@ export function LLDCanvas() {
           onUpdate={handleUpdateNode}
           onClose={() => setSelectedNodeId(null)}
         />
+      )}
+
+      {/* Validation Results Modal */}
+      {validationModal && (
+        <div className="modal-overlay" onClick={() => setValidationModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, color: validationModal.valid ? '#81c784' : '#ef5350' }}>
+                {validationModal.valid ? '✓ Architecture Validated' : '⚠ Validation Issues Found'}
+              </h2>
+              <button onClick={() => setValidationModal(null)} className="spec-close-btn">&times;</button>
+            </div>
+            <p style={{ color: '#aaa', fontSize: '0.85rem' }}>
+              Verified {validationModal.class_count} classes/interfaces and {validationModal.relationship_count} relationships.
+            </p>
+
+            {validationModal.errors.length > 0 && (
+              <div style={{ background: 'rgba(239, 83, 80, 0.15)', border: '1px solid #ef5350', padding: 12, borderRadius: 6, marginBottom: 10 }}>
+                <strong style={{ color: '#ef5350' }}>Structural Errors:</strong>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 20, color: '#ffcdd2' }}>
+                  {validationModal.errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {validationModal.warnings.length > 0 && (
+              <div style={{ background: 'rgba(255, 167, 38, 0.15)', border: '1px solid #ffa726', padding: 12, borderRadius: 6, marginBottom: 10 }}>
+                <strong style={{ color: '#ffa726' }}>Semantic Warnings:</strong>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 20, color: '#ffe0b2' }}>
+                  {validationModal.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {validationModal.valid && validationModal.warnings.length === 0 && (
+              <div style={{ color: '#81c784', padding: '10px 0' }}>
+                No circular inheritance, illegal extensions, or missing references detected. Code generation will produce valid skeletons.
+              </div>
+            )}
+
+            <button className="safe-btn" onClick={() => setValidationModal(null)} style={{ marginTop: 10, width: '100%' }}>
+              Close Validation
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

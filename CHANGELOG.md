@@ -2,6 +2,38 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 7 — Frontend Quality, Telemetry Charts, and LLD Suite] - 2026-10-21
+
+### Completed
+- **Live Telemetry Charts (`frontend/src/components/TelemetryCharts.tsx`):**
+  - Developed pure React + SVG time-series charts rendering latency percentiles (p50, p95, p99), throughput, drop rate, queue depth, and utilization over time.
+  - Supported dual-mode inspection: single-click toggle between individual component telemetry and server-aggregated whole-system telemetry.
+  - Server-side pre-aggregation within time windows preserves 60 FPS UI performance under heavy simulation workloads.
+- **Accessible Node Health States (`frontend/src/nodes/InfrastructureNode.tsx`):**
+  - Added explicit text-and-color badges for all failure and degradation states: `[HEALTHY]`, `[DEGRADED]`, `[OVERLOADED]`, `[FAILED]`, `[CIRCUIT OPEN]`, and `[HALF OPEN]`.
+  - Added real-time visual progress gauges for worker concurrency utilization and waiting queue depth capacity.
+  - Displayed live throughput, p95 latency, and dropped request counters directly on canvas nodes.
+- **Comprehensive Properties Panel (`frontend/src/components/PropertiesPanel.tsx`):**
+  - Developed interactive configuration drawer for nodes and connection edges.
+  - Configurable parameters: worker concurrency, service time distribution (`constant`, `exponential`, `lognormal`), mean service latency, bounded queue buffer depth, request timeouts, retry policies (max attempts, backoff, jitter, retry budget ratio), circuit breakers (thresholds and recovery cooldowns), token bucket rate limiting, client arrival patterns, load balancer strategies, and cache hit ratios.
+  - Enforced input bounds validation and pre-populated sensible production defaults.
+- **Resilience UI, Keyboard Accessibility, and Presets (`frontend/src/Canvas.tsx`):**
+  - Added auto-reconnecting `connection-lost-banner` tracking SocketIO connectivity state.
+  - Implemented accessible keyboard shortcuts: `Space` (Start / Pause / Resume), `S` (Step 0.5s forward), `R` (Reset simulation), `Delete` / `Backspace` (Delete node or edge).
+  - Added floating simulation toolbar with speed adjustment slider (`0.25x` to `100x`), step controls, and status pills.
+  - Added empty state illustrations for both canvas and bottleneck analyzer.
+  - Integrated Scenario Preset Selector modal loading pre-configured topologies from `/api/simulation/presets`.
+  - Integrated Architecture Compare modal running side-by-side comparative simulations via `/api/simulation/compare`.
+- **Low-Level Design (LLD) Scope Decision & Polyglot Generator:**
+  - *Decision:* Retained LLD as a decoupled, fully tested architectural sub-module within the simulator repository.
+  - Built `backend/core/lld_generator.py` featuring:
+    - UML relationship and structural validator with cycle detection and semantic hierarchy verification.
+    - Strict polyglot skeleton code generator producing TypeScript and Python 3.11 skeletons with abstract classes (`ABC`), interfaces, type hints, generics, and inheritance constructors.
+    - Code packaging and multi-file export archive serialization.
+  - Exposed REST endpoints in `backend/api/lld_api.py`: `POST /api/lld/validate`, `POST /api/lld/generate`, `POST /api/lld/export` (downloads `.zip` archive).
+  - Connected frontend `LLDCanvas.tsx` and `LLDSpecificationsPanel.tsx` with one-click code file downloads (`.ts`, `.py`, `.zip`) and UML architecture validation.
+  - Added automated unit tests (`backend/tests/test_lld_generator.py`) passing all 8 edge cases.
+
 ## [Phase 6 — Persistence, Sessions, and Safety] - 2026-10-21
 
 ### Completed

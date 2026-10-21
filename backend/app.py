@@ -4,6 +4,7 @@ from flask_cors import CORS
 from api.architecture import architecture_bp
 from api.simulation_api import simulation_bp
 from api.designs_api import designs_bp
+from api.lld_api import lld_blueprint
 from extensions import socketio, db
 from core.simulation_manager import sim_manager
 from flask_socketio import join_room, leave_room
@@ -32,6 +33,7 @@ socketio.init_app(app, cors_allowed_origins=cors_origins)
 app.register_blueprint(architecture_bp, url_prefix='/api/architecture')
 app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
 app.register_blueprint(designs_bp, url_prefix='/api/designs')
+app.register_blueprint(lld_blueprint, url_prefix='/api/lld')
 
 # Create tables within application context
 with app.app_context():

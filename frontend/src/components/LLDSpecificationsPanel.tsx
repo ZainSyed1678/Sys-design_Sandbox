@@ -325,7 +325,7 @@ export function LLDSpecificationsPanel({ node, onUpdate, onClose }: Props) {
         </div>
       ) : (
         <div className="spec-body">
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
             <button 
               className={`spec-lang-btn ${codeLang === 'typescript' ? 'active' : ''}`}
               onClick={() => setCodeLang('typescript')}
@@ -337,6 +337,31 @@ export function LLDSpecificationsPanel({ node, onUpdate, onClose }: Props) {
               onClick={() => setCodeLang('python')}
             >
               Python
+            </button>
+            <button
+              onClick={() => {
+                const code = generateCode();
+                const ext = codeLang === 'typescript' ? 'ts' : 'py';
+                const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${node.data.label}.${ext}`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              style={{
+                marginLeft: 'auto',
+                background: '#2e7d32',
+                color: '#fff',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+              }}
+            >
+              Download {codeLang === 'typescript' ? '.ts' : '.py'}
             </button>
           </div>
           <pre className="spec-code-block">
