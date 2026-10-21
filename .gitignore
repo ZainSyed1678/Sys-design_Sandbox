@@ -1,6 +1,9 @@
 node_modules/
 __pycache__/
 *.pyc
+*.db
+instance/
+.pytest_cache/
 .env
 .venv/
 venv/

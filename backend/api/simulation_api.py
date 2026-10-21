@@ -12,10 +12,12 @@ def start_simulation():
     if not data or 'nodes' not in data:
         return jsonify({"status": "error", "message": "No graph data provided"}), 400
 
-    sim_id = sim_manager.create_simulation(data)
-    sim = sim_manager.get_simulation(sim_id)
+    sim_id, err = sim_manager.create_simulation(data)
+    if err:
+        return jsonify({"status": "error", "message": err}), 400
 
-    if sim.state.value == "FAILED":
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim or sim.state.value == "FAILED":
         return jsonify({"status": "error", "message": "Failed to build topology graph"}), 400
 
     sim.start()
@@ -29,6 +31,58 @@ def stop_simulation(sim_id):
 
     sim.stop()
     return jsonify({"status": "ok", "state": sim.state.value})
+
+@simulation_bp.route('/<sim_id>/pause', methods=['POST'])
+def pause_simulation(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+
+    sim.pause()
+    return jsonify({"status": "ok", "state": sim.state.value})
+
+@simulation_bp.route('/<sim_id>/resume', methods=['POST'])
+def resume_simulation(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+
+    sim.resume()
+    return jsonify({"status": "ok", "state": sim.state.value})
+
+@simulation_bp.route('/<sim_id>/step', methods=['POST'])
+def step_simulation(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+
+    data = request.json or {}
+    seconds = float(data.get("seconds", 0.5))
+    sim.step(seconds=seconds)
+    return jsonify({"status": "ok", "state": sim.state.value, "sim_time": round(sim.engine.time, 4)})
+
+@simulation_bp.route('/<sim_id>/reset', methods=['POST'])
+def reset_simulation(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+
+    sim.reset()
+    return jsonify({"status": "ok", "state": sim.state.value, "sim_time": 0.0})
+
+@simulation_bp.route('/<sim_id>/speed', methods=['POST'])
+def set_speed(sim_id):
+    sim = sim_manager.get_simulation(sim_id)
+    if not sim:
+        return jsonify({"status": "error", "message": "Simulation not found"}), 404
+
+    data = request.json or {}
+    if "speed" not in data:
+        return jsonify({"status": "error", "message": "Field 'speed' is required (0.25 to 100.0)."}), 400
+
+    speed = float(data["speed"])
+    sim.set_speed(speed)
+    return jsonify({"status": "ok", "speed": sim.speed})
 
 @simulation_bp.route('/<sim_id>/status', methods=['GET'])
 def get_status(sim_id):

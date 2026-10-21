@@ -2,6 +2,31 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 6 — Persistence, Sessions, and Safety] - 2026-10-21
+
+### Completed
+- **PostgreSQL Design Persistence (`backend/models/design.py`, `backend/api/designs_api.py`):**
+  - Built `Design` model with schema versioning, metadata, and JSON topology storage using SQLAlchemy.
+  - Full REST CRUD API (`/api/designs`): Create, Read, List, Update, and Delete named designs with strict payload schema validation.
+  - Added Design Export (`/api/designs/<id>/export`) generating downloadable JSON files.
+  - Added Design Import (`/api/designs/import`) supporting file uploads and JSON bodies.
+  - Added Shareable Design Link generation (`/api/designs/share/<id>`).
+- **Pruned Unused Services (Redis Decision):**
+  - Based on the Phase 0 audit finding that Redis was unused by all code paths, removed `redis` service and `redisdata` volume from `docker-compose.yml`.
+  - Removed `REDIS_URL` environment variable and purged `redis` from `backend/requirements.txt`.
+- **Session Isolation & Safety Guardrails (`backend/core/simulation_manager.py`):**
+  - Replaced global SocketIO metric broadcasts with isolated per-simulation rooms (`room=sim_id`).
+  - Implemented automatic thread termination and session cleanup on client socket disconnect (`handle_client_disconnect`).
+  - Enforced system safety bounds: `MAX_NODES = 100`, `MAX_EDGES = 200`, `MAX_SIM_DURATION = 3600s`, `MAX_EVENTS = 500,000`, and `MAX_CONCURRENT_RUNS = 10`.
+  - Configured 5MB request body ceiling (`MAX_CONTENT_LENGTH`).
+- **Pre-Flight Topology Validation (`validate_topology`):**
+  - Rejects invalid topologies before starting simulation: requires at least one client node, verifies edge source/target existence, detects disconnected orphan nodes, and returns clear human-readable 400 errors.
+- **Simulation Controls & Speed Modulation:**
+  - Added speed adjustment from `0.25x` to `100.0x` scaling sleep intervals.
+  - Added lifecycle endpoints: `/pause`, `/resume`, `/step` (discrete virtual time advancement), `/reset`, and `/speed`.
+- **Automated Unit & Integration Tests (`backend/tests/test_persistence_and_safety.py`):**
+  - Added 7 tests covering topology validation edge cases, design CRUD, export/import/share, speed modulation, and simulation lifecycle states.
+
 ## [Phase 5 — Analysis and Comparison] - 2026-10-21
 
 ### Completed
