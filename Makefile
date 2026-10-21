@@ -1,4 +1,4 @@
-.PHONY: up down test lint dev-backend dev-frontend help
+.PHONY: up down test lint dev-backend dev-frontend validate help
 
 help:
 	@echo "System Design Simulator Makefile"
@@ -6,6 +6,7 @@ help:
 	@echo "  make up           Start all services in Docker Compose (daemon mode)"
 	@echo "  make down         Stop all Docker Compose services"
 	@echo "  make test         Run backend unit tests with pytest"
+	@echo "  make validate     Run queueing theory validation checks and generate docs/validation.md"
 	@echo "  make lint         Run backend linting"
 	@echo "  make dev-backend  Run backend locally with Flask"
 	@echo "  make dev-frontend Run frontend locally with Vite"
@@ -18,6 +19,9 @@ down:
 
 test:
 	pytest backend/tests
+
+validate:
+	python scripts/validate_engine.py
 
 lint:
 	flake8 backend || echo "flake8 finished"

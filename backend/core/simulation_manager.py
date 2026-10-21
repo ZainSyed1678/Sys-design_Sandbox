@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 
 from simulation.engine import SimulationEngine
 from simulation.components import Client, LoadBalancer, APIServer, Database, Cache, MessageQueue, Worker
+from simulation.distributions import Distribution, DistributionType
 from simulation.events import Event, EventType
 from extensions import socketio
 from core.analyzer import analyzer
@@ -23,60 +24,102 @@ class SimulationInstance:
         self.sim_id = sim_id
         self.graph = graph
         self.state = SimState.CREATED
-        self.engine = SimulationEngine()
+        seed = int(graph.get("seed", 42))
+        self.engine = SimulationEngine(seed=seed)
         self.thread = None
         self._stop_event = threading.Event()
-        
+
     def build(self):
         try:
             nodes = self.graph.get("nodes", [])
             edges = self.graph.get("edges", [])
-            
-            node_map = {n["id"]: n for n in nodes}
+
             adj = {}
             for e in edges:
                 src = e["source"]
                 tgt = e["target"]
-                if src not in adj: adj[src] = []
+                if src not in adj:
+                    adj[src] = []
                 adj[src].append(tgt)
-                
+
             for n in nodes:
                 nid = n["id"]
-                ntype = n["data"].get("type", "unknown")
+                data = n.get("data", {})
+                ntype = data.get("type", "unknown")
                 targets = adj.get(nid, [])
-                
+
                 if ntype == "client":
                     target_id = targets[0] if targets else "none"
-                    comp = Client(nid, target_id, rate_per_sec=10)
+                    rate = float(data.get("rate_per_sec", 10))
+                    arr_process = data.get("arrival_process", "poisson")
+                    comp = Client(nid, target_id, rate_per_sec=rate, arrival_process=arr_process)
                     self.engine.register_component(comp)
                     self.engine.schedule(Event(time=0.0, type=EventType.REQUEST_ARRIVED, target_id=nid))
+
                 elif ntype == "load_balancer":
-                    comp = LoadBalancer(nid, backend_ids=targets)
+                    strategy = data.get("strategy", "round_robin")
+                    comp = LoadBalancer(nid, backend_ids=targets, strategy=strategy)
                     self.engine.register_component(comp)
+
                 elif ntype == "api":
                     db_id = targets[0] if targets else None
-                    comp = APIServer(nid, capacity=10, latency=0.1, db_id=db_id)
+                    concurrency = int(data.get("concurrency", data.get("capacity", 10)))
+                    latency = float(data.get("latency", 0.1))
+                    max_queue = data.get("max_queue_depth", 50)
+                    dist_type = data.get("distribution", DistributionType.CONSTANT.value)
+                    service_dist = Distribution(dist_type, mean=latency)
+                    comp = APIServer(
+                        nid,
+                        concurrency=concurrency,
+                        latency=latency,
+                        service_dist=service_dist,
+                        max_queue_depth=max_queue,
+                        db_id=db_id,
+                    )
                     self.engine.register_component(comp)
+
                 elif ntype == "database":
-                    comp = Database(nid, capacity=5, latency=0.2)
+                    concurrency = int(data.get("concurrency", data.get("capacity", 5)))
+                    latency = float(data.get("latency", 0.2))
+                    max_queue = data.get("max_queue_depth", 50)
+                    dist_type = data.get("distribution", DistributionType.CONSTANT.value)
+                    service_dist = Distribution(dist_type, mean=latency)
+                    comp = Database(
+                        nid,
+                        concurrency=concurrency,
+                        latency=latency,
+                        service_dist=service_dist,
+                        max_queue_depth=max_queue,
+                    )
                     self.engine.register_component(comp)
+
                 elif ntype == "cache":
                     db_id = targets[0] if targets else None
-                    comp = Cache(nid, db_id=db_id, hit_rate=0.8, latency=0.01)
+                    hit_rate = float(data.get("hit_rate", 0.8))
+                    latency = float(data.get("latency", 0.01))
+                    comp = Cache(nid, db_id=db_id, hit_rate=hit_rate, latency=latency)
                     self.engine.register_component(comp)
+
                 elif ntype == "queue":
-                    comp = MessageQueue(nid, max_depth=1000)
+                    max_depth = int(data.get("max_depth", 1000))
+                    comp = MessageQueue(nid, max_depth=max_depth)
                     for t in targets:
                         comp.register_worker(t)
                     self.engine.register_component(comp)
+
                 elif ntype == "worker":
                     queue_id = "none"
                     for qid, qtargets in adj.items():
                         if nid in qtargets:
                             queue_id = qid
                             break
-                    comp = Worker(nid, queue_id=queue_id, capacity=5, latency=1.0)
+                    concurrency = int(data.get("concurrency", data.get("capacity", 5)))
+                    latency = float(data.get("latency", 1.0))
+                    dist_type = data.get("distribution", DistributionType.CONSTANT.value)
+                    service_dist = Distribution(dist_type, mean=latency)
+                    comp = Worker(nid, queue_id=queue_id, concurrency=concurrency, latency=latency, service_dist=service_dist)
                     self.engine.register_component(comp)
+
             self.state = SimState.CREATED
         except Exception as e:
             import logging
@@ -86,24 +129,24 @@ class SimulationInstance:
     def _run_loop(self):
         self.state = SimState.RUNNING
         socketio.emit('SIM_STARTED', {'sim_id': self.sim_id})
-        
+
         while not self._stop_event.is_set():
             step_until = self.engine.time + 0.5
             self.engine.run(until=step_until)
-            
+
             states = self.engine.get_component_states()
             analysis = analyzer.analyze(states, self.engine.metrics)
-            
+
             socketio.emit('METRICS_UPDATE', {
                 'sim_id': self.sim_id,
-                'time': self.engine.time,
+                'time': round(self.engine.time, 4),
                 'metrics': self.engine.metrics,
                 'components': states,
                 'analysis': analysis
             })
-            
+
             time.sleep(0.5)
-            
+
         self.state = SimState.STOPPED
         socketio.emit('SIM_STOPPED', {'sim_id': self.sim_id})
 
@@ -124,7 +167,7 @@ class SimulationInstance:
     def get_metrics(self) -> Dict[str, Any]:
         return {
             "state": self.state.value,
-            "sim_time": self.engine.time,
+            "sim_time": round(self.engine.time, 4),
             "metrics": self.engine.metrics,
             "components": self.engine.get_component_states()
         }
@@ -132,7 +175,8 @@ class SimulationInstance:
     def inject_event(self, target_id: str, event_type: str, data: Dict[str, Any] = None):
         if self.state != SimState.RUNNING:
             return False
-        if not data: data = {}
+        if not data:
+            data = {}
         try:
             etype = EventType(event_type)
             self.engine.schedule(Event(

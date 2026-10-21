@@ -2,6 +2,33 @@
 
 All notable changes to the **Sys-design_Sandbox** simulator are documented here.
 
+## [Phase 2 — Simulation Correctness and Validation] - 2026-10-21
+
+### Completed
+- **Stochastic Service & Arrival Models:**
+  - Implemented `Distribution` and `DistributionType` (`backend/simulation/distributions.py`) supporting `constant`, `exponential`, `lognormal`, and `poisson` distributions.
+  - Parameterized service times and arrival processes to be driven exclusively by seeded PRNG (`random.Random(seed)`).
+- **Explicit Multi-Server Queueing:**
+  - Implemented explicit queueing mechanics across server components (`APIServer`, `Database`, `Worker`): concurrency $c \ge 1$ workers, bounded/unbounded waiting queue, FIFO dispatching, and queue overflow dropping.
+  - Added continuous area-integral accumulation (`area_busy`, `area_queue`, `area_system`) for exact server utilization ($\rho = \frac{\int \text{active}(t) dt}{c \cdot T}$), time-average queue length ($L_q$), and system occupancy ($L$).
+- **Deterministic Latency & Metrics Tracking:**
+  - Replaced nondeterministic `uuid.uuid4()` with sequential request generation (`req_{comp}_{id}`).
+  - Added total ordering and deterministic tie-breaking in `Event` via sequential `event_id` and priority.
+  - Implemented end-to-end and per-hop latency tracking recording arrival, queue wait, service execution, and exit.
+  - Implemented percentiles computation: p50, p95, p99, mean, max, throughput, and drop rate.
+  - Added fixed-size time window aggregation (`time_window_size = 1.0s`) for time series history.
+- **Automated Analytic Queueing Validation Suite:**
+  - Created `backend/tests/test_queueing.py` with rigorous tolerance justification:
+    - $M/M/1$: Verified mean time in system $W = 1/(\mu - \lambda)$ and utilization $\rho = \lambda/\mu$ (1.88% and 0.31% relative error).
+    - $M/M/c$: Verified Erlang C mean waiting time $W_q = \frac{C(c, r)}{c\mu - \lambda}$ and system time $W$ (2.34% and 0.72% relative error).
+    - Little's Law: Verified $L = \lambda_{\text{eff}} W$ across single-server, multi-server, and deterministic queues ($< 0.1\%$ relative error).
+    - Overload: Verified $M/M/1/K$ drop rate convergence to closed-form blocking probability $P_b = \frac{(1-\rho)\rho^K}{1-\rho^{K+1}}$ (0.31% relative error).
+    - Determinism: Verified bit-for-bit identical latency and metrics traces across runs with identical seed.
+- **Validation Script & Reporting:**
+  - Created `scripts/validate_engine.py` to run automated verification and generate `docs/validation.md`.
+  - Added `make validate` target to `Makefile`.
+  - Updated `README.md` to link to `docs/validation.md` and quote verified empirical metrics.
+
 ## [Phase 1 — Professional Labels & Repo Hygiene] - 2026-10-21
 
 ### Completed
